@@ -1,0 +1,294 @@
+#include <signal.h>
+#include <pthread.h>
+#if 0
+#include "ns_defines.h"
+#endif
+#include "Cmdline.h"
+#include "nsGLOBAL.h"
+#include "nsPBLM.h"
+#include "ns_extern.h"
+#include "Monitor.h"
+
+typedef struct
+{
+  I 		iproc;
+  I 		nproc;
+  pCmdline 	cmdline;  
+  ns_mesh *	mesh;
+} Thread,* RESTRICT pThread;
+
+
+void * thread_ns_do(void*usrptr_)
+{
+  pThread proc = usrptr_;
+
+
+  Monitor_msg(proc->iproc,"thread "ifmt"/"ifmt"",proc->iproc,proc->nproc);
+  Err err 	= Global_main(&global[proc->iproc],
+			      proc->cmdline);  
+  if (err)
+    {
+      Monitor_errmsg(proc->iproc,"ns_main:ns_global_main failed "efmt"",err);
+      pthread_exit((void*)proc);
+      return NULL;
+    }
+  global[proc->iproc].iproc = proc->iproc;
+
+  Monitor_msg(proc->iproc,"thread "ifmt"/"ifmt" precompute",proc->iproc,proc->nproc);
+  err 	= Global_precompute(&global[proc->iproc],
+			    proc->mesh);  
+  if (err)
+    {
+      Monitor_errmsg(proc->iproc,"ns_main:nsGLOBAL_precompute failed "efmt"",err);
+      pthread_exit((void*)proc);
+      return NULL;
+    }
+
+
+  Monitor_msg(proc->iproc,"thread "ifmt"/"ifmt" start solver",proc->iproc,proc->nproc);
+  { cst_pParameters const parameters = Global_get_Parameters(&global[proc->iproc]);    
+
+    if (parameters->linfo[__ens_linfo_verbose]) 
+      Monitor_msg(proc->iproc,"ns_main:starting solver ...");    
+#if 0    
+    { eStateSolver job = __eStateSolver_ERROR;
+      err = nsPBLM_run(proc->iproc,parameters->sinfo[__ens_sinfo_pblmname],&job); }    
+#endif    
+    if (parameters->linfo[__ens_linfo_verbose])    
+      Monitor_msg(proc->iproc,"ns_main:solver job completed."); }
+
+  pthread_exit((void*)proc);
+  return NULL;
+}
+
+Err 	ns_viewu			(  pCmdline 	const cmdline_,
+						 L*		have_);
+
+Err ns_viewu(pCmdline const 	cmdline_,
+		 L*		have_)
+{
+  
+  { I viewu;
+    have_[0] = Cmdline_get_integer(cmdline_,"--viewu",&viewu);
+    if (have_[0])
+      {
+	pTime const gTimeInfo	= Global_get_Time(&global[0]);
+	char ctmp[512];
+	sprintf(ctmp,"integrator.u.%.5"nsFORMAT_INTEGER".timeinfo.txt",viewu);
+	{ FILE*fil = fopen(ctmp,"r");
+	  if (NOT fil)
+	    {
+	      fprintf(stderr,"can not open '%s'\n",ctmp);
+	      return __eErr_file;
+	    }
+	  int ii = fscanf(fil,""ifmt" "ifmt" %lf",&gTimeInfo->itime_interval,&gTimeInfo->itime,&gTimeInfo->t);
+	  if (ii==4321)
+	    {
+
+	    }
+	  fclose(fil);
+	}
+	sprintf(ctmp,"ln -fs integrator.u.%.5"nsFORMAT_INTEGER".bb integrator.P2.%.5"nsFORMAT_INTEGER".bb",viewu,gTimeInfo->itime_interval);
+	if (system(ctmp))
+	  {
+	    fprintf(stderr,"erreur system '%s'\n",ctmp);
+	    return __eErr_user;
+	  }
+	int ii = sprintf(ctmp,"mkmake_view integrator.P2.%.5"nsFORMAT_INTEGER"",gTimeInfo->itime_interval);
+	int j ;
+	for (j=1;j<cmdline_->argc;++j)
+	  ii+=sprintf(&ctmp[ii]," %s",cmdline_->argv[j]);
+	if (system(ctmp))
+	  {
+	    fprintf(stderr,"erreur system '%s'\n",ctmp);
+	    return __eErr_user;
+	  }
+	return __eErr_no;
+      } }
+  return __eErr_no;
+}
+
+
+static void ns_main_signal(int sigid) 
+{
+
+  fflush(stdout);
+  fflush(stderr);
+  fprintf(stderr,"\n");
+  Monitor_errmsg(0,"ns_main_signal:Unexpected error"); 
+  switch(sigid) {
+    case SIGABRT:
+      Monitor_errmsg(0,"ns_main_signal:<Abnormal stop>");  
+      exit(1);
+      break;
+    case SIGFPE:
+      Monitor_errmsg(0,"ns_main_signal:<Floating-point exception>"); 
+      exit(1);
+      break;
+    case SIGILL:
+      Monitor_errmsg(0,"ns_main_signal:<Illegal instruction>"); exit(1);break;
+    case SIGSEGV:
+      Monitor_errmsg(0,"ns_main_signal:<Segmentation fault>");  exit(1);break;
+    case SIGTERM:
+      {
+	Monitor_errmsg(0,"<Program killed>2");  
+	exit(1);
+	break;
+      }
+    case SIGINT:
+      {
+	Monitor_errmsg(0,"<Program killed>");  
+	exit(1);
+	break;
+      }
+  default:
+    {
+      Monitor_errmsg(0,"  ??? unrecognized error");  
+      exit(1);
+      break;
+    }
+  }
+
+}
+
+static void ns_main_atexit()
+{
+#ifndef NDEBUG
+  printf("ns_at_exit ...\n");
+#endif
+
+#ifndef NDEBUG
+  printf("ns_at_exit done.\n");
+#endif
+}
+
+
+
+Err ns_main(int 		argc,
+		const char**	argv)
+{  
+
+  Cmdline cmdline[MNS_MAX_THREAD];
+  Err err	= __eErr_no;
+
+
+  atexit(ns_main_atexit);
+  signal(SIGABRT,ns_main_signal);
+  signal(SIGFPE,ns_main_signal);
+  signal(SIGILL,ns_main_signal);
+  signal(SIGSEGV,ns_main_signal);
+  signal(SIGTERM,ns_main_signal);
+  signal(SIGINT,ns_main_signal);
+
+
+  I nproc =8;
+
+  { I i;
+    for (i=0;i<nproc;++i)
+      {
+	Cmdline_def (&cmdline[i],
+		       argc,
+		       argv);	
+      } }
+
+  L 	have_viewu 	= __emnsNO;
+  /* 0/ GENERATE CONFIG FILE ? */
+  { STR ctmp;
+    if ( (Cmdline_get_string(cmdline,"--config",ctmp)) )
+      {
+#if 0
+#ifndef NDEBUG
+	ns_printf("ns_main:write default config file '%s'",ctmp);
+#endif
+#endif
+#if 0
+	mkmake_ns_write_configfile(ctmp);
+#endif
+	return __eErr_no;
+      } }
+  /* 0/ MANPAGE ? */
+
+  if (!Cmdline_get_integer(cmdline,"-n",&nproc))
+    {
+      Monitor_warn(0,"set nproc to 1");
+      nproc=1;
+    }
+#if 0
+  if (Cmdline_get_logical(cmdline,"--manpage"))
+    {
+      ns_manpage(NS_PATH "/doc/ownman/man3/mkmake_ns.3",&err);
+      if (err)
+	{
+	  ns_errmsg("ns_main:ns_manpage failed");
+	  return err;
+	}
+      return __eErr_no;
+    }
+#endif
+  /* 0/ CALL MEDIT VIEW U ? */
+  err = ns_viewu(cmdline,&have_viewu);
+  if (have_viewu)
+    {
+      if (err)
+	{
+	  Monitor_errmsg(0,"ns_main:ns_viewu failed");
+	  return err;
+	}
+      return __eErr_no;
+    }
+
+
+  ns_mesh meshes[MNS_MAX_THREAD];
+  { I i;
+    for (i=0;i<nproc;++i)
+      {
+	err = ns_mesh_read(&meshes[i],"%s.p%.2lld.mesh",argv[1],i);
+	if (err)
+	  {
+	    Monitor_errmsg(i,"nsGLOBAL_main:ns_mesh_read failed");
+	    return err;
+	  }
+      } }
+
+  Thread 		threads[MNS_MAX_THREAD];
+  int			status;
+  pthread_t 		thread[MNS_MAX_THREAD];
+  pthread_attr_t 	attr;
+  pthread_mutex_t 	mutex_mkPARALLEL;    
+  pthread_mutex_init ( &mutex_mkPARALLEL, NULL );    
+  pthread_attr_init ( &attr ); 
+  pthread_attr_setdetachstate ( &attr, PTHREAD_CREATE_JOINABLE );        
+  { I i;
+    for (i=0;i<nproc;++i)
+      {
+	threads[i].mesh = &meshes[i];
+	threads[i].iproc = i;
+	threads[i].nproc = nproc;
+	threads[i].cmdline = &cmdline[i];
+	pthread_create(&thread[i],&attr,thread_ns_do,(void*)&threads[i]);  
+      } }        
+  { I i;
+    for (i=0;i<nproc;++i)
+      {
+	pthread_join(thread[i],(void**)&status);
+      } }
+  pthread_attr_destroy ( &attr );
+  pthread_mutex_destroy (&mutex_mkPARALLEL); 
+  err = __eErr_no;
+
+
+  return err;
+}
+
+
+
+
+int main(int 		argc,
+	 const char**	argv)
+{
+  Monitor_def	(0,
+		 argv[0],
+		 MonitorMode_STD);
+  
+  return ns_main(argc,argv);
+}

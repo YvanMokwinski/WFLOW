@@ -1,0 +1,509 @@
+#include <iostream>
+#include <valarray>
+#include <array>
+
+
+enum struct TopologicalDimension
+{
+  Point=0,
+    Edge=1,
+    Face = 2,
+    Volume = 3
+    };
+
+
+std::ostream& operator<<(std::ostream&s_,
+			 const TopologicalDimension& faceType_)
+{
+  switch(faceType_)
+    {
+      case TopologicalDimension::Point:
+	{
+	  s_ << "Point";
+	  break;
+	}
+      case TopologicalDimension::Edge:
+	{
+	  s_ << "Edge";
+	  break;
+	}
+      case TopologicalDimension::Face:
+	{
+	  s_ << "Face";
+	  break;
+	}
+      case TopologicalDimension::Volume:
+	{
+	  s_ << "Volume";
+	  break;
+	}
+
+      }
+    return s_;
+  };
+
+
+
+using I = long long int;
+
+template <unsigned int n> class Mesh1D
+{
+public:
+inline   Mesh1D(double x0,double xn) noexcept
+    : m_size(n+1)
+  {
+    m_size = n+1;
+
+    double dx = (xn - x0) / (n+1);
+    m_x[0] = x0;
+    for (unsigned int i=1;i<=n;++i)
+      {
+	m_x[i] = x0 + dx * i;
+      }
+    m_x[n] = xn;
+  };
+
+inline   const std::array<double,n>& Coordinates() const noexcept  
+  {
+    return m_x;
+  };
+  
+inline   unsigned int NumNodes() const noexcept  
+  {
+    return m_size;
+  };
+
+inline   unsigned int NumCells() const noexcept 
+  {
+    return m_size-1;
+  };
+  
+inline   double GetNodeCoordinates(const unsigned int i) const noexcept  
+  {
+    return m_x[i];
+  };
+
+inline   void GetCoordinates(const unsigned int i,std::array<double,2>&x) const
+  {
+    x[0] = m_x[i];
+    x[1] = m_x[i+1];
+  };
+  
+private:
+  unsigned int m_size;
+  std::array<double,n+1> m_x;
+};
+
+
+
+
+class LinearFiniteElement1D
+{
+public:
+  LinearFiniteElement1D()
+  {
+  };
+  using ShapeValues = std::array<double,2>;
+
+  inline unsigned int NumShapes() const noexcept
+  {
+    return 2;
+  };
+  
+  inline void Eval(double r,ShapeValues& phi)  const noexcept
+  {
+    phi[0] = (1.0 - r)*0.5;
+    phi[1] = (1.0+r)*0.5;
+  };
+
+  inline void DEval(double r,ShapeValues& dphi) const noexcept
+  {
+    dphi[0] = -0.5;
+    dphi[1] = 0.5;
+  };
+
+};
+
+
+template <typename value> class QuadraticFiniteElement1D
+{
+public:
+  QuadraticFiniteElement1D()
+  {
+  };
+  using ShapeValues = std::array<value,3>;
+
+  inline unsigned int NumShapes() const noexcept
+  {
+    return 3;
+  };
+
+  static constexpr value s_half = value(0.5);
+  static constexpr value s_one = value(1.0);
+  static constexpr value s_two = value(2.0);
+  
+  inline void Eval(const value& r,ShapeValues& phi)  const noexcept
+  {
+    phi[0] = s_half*r*(r-s_one);
+    phi[1] = s_one-r*r;
+    phi[2] = s_half*r*(r+s_one);
+  };
+
+  inline void DEval(const value& r,ShapeValues& dphi) const noexcept
+  {
+    dphi[0] = s_half*(s_two*r-s_one);
+    dphi[1] = -s_two*r;
+    dphi[2] = s_half*(s_two*r+s_one);
+  };
+
+};
+
+
+
+class Quadrature1D
+{
+public:
+  constexpr Quadrature1D()
+  {
+
+  };
+
+  constexpr unsigned int N() const noexcept
+  {
+    return 5;
+  };
+  
+  constexpr std::array<double,5> W() const noexcept
+  {
+    return m_w;
+  };
+
+  constexpr std::array<double,5> P() const noexcept
+  {
+    return m_p;
+  };
+  
+private:
+  static constexpr std::array<double,5> m_w{{
+      2.369268850561891e-1,
+	4.786286704993665e-1,
+	5.688888888888889e-1,
+	4.786286704993665e-1,
+	2.369268850561891e-1}};
+  
+  static constexpr std::array<double,5> m_p{{
+      -9.06179845938664e-1,
+	-5.384693101056831e-1,
+	0.0,
+	5.384693101056831e-1,
+	9.06179845938664e-1}};
+
+
+};
+
+
+template <unsigned int n,typename F> class FiniteElementSpace1D
+{
+  
+public:
+  Mesh1D<n> m_grid;
+  F* m_f;
+  I m_numDofs;
+  FiniteElementSpace1D(double a,double b,F * f)
+    : m_grid(a,b),m_f(f)
+  {
+    const auto nf = f->NumShapes();
+    const auto numCells = m_grid.NumCells();
+
+    std::cout << nf << std::endl;
+    std::cout << numCells << std::endl;
+    m_cnc = new I[nf*m_grid.NumCells()];
+    for (unsigned int cellIndex=0;cellIndex<numCells;++cellIndex)
+      {
+	m_cnc[nf*cellIndex + 0] = cellIndex;
+	for(int i=1;i<nf-1;++i)
+	  {
+	    m_cnc[nf*cellIndex + i] = numCells + cellIndex * (nf-2) + i;
+	  }	
+	m_cnc[nf*cellIndex + (nf-1)] = cellIndex+1;
+      }
+
+    m_numDofs = n+1 + (nf-2) * numCells; 
+    
+    for (unsigned int cellIndex=0;cellIndex<numCells;++cellIndex)
+      {
+	for(int i=0;i<nf;++i)
+	  {
+	    std::cout << " " << m_cnc[nf*cellIndex + i];
+	  }
+	std::cout << std::endl;
+      }
+    
+  };
+
+  inline I NumDofs() const noexcept
+  {
+    return  m_numDofs;
+  };
+
+  using CellToDofs = std::array<I,3> ;
+
+  inline void GetCellToDofs(const unsigned int cellIndex,CellToDofs&c) const
+  {
+    const auto nf = m_f->NumShapes();
+    for(int i=0;i<nf;++i)
+      {
+	c[i] = m_cnc[nf*cellIndex+i];
+      }
+  };
+  
+  
+private:
+
+  I* m_cnc;
+};
+
+int main()
+{
+  
+  Mesh1D<10> grid1D(1.0,2.0);
+  //  auto a = init<10>(1.0,2.0);
+  for (unsigned int i=0;i<grid1D.NumNodes();++i)
+    {
+      std::cout << grid1D.GetNodeCoordinates(i) << std::endl;
+    }
+
+  std::cout.precision(15);
+  std::cout.setf(std::ios::scientific);
+
+
+  
+  {
+    QuadraticFiniteElement1D<double> f2;
+    QuadraticFiniteElement1D<double>::ShapeValues phi;
+    
+    f2.Eval(-1.0,phi);
+    // << std::setprecision(17);
+    for(const auto x : phi)
+      {
+	std::cout << "ddddd " << x << std::endl;
+      }
+  }
+
+  {
+    LinearFiniteElement1D f1;
+    LinearFiniteElement1D::ShapeValues phi;
+    
+    f1.Eval(0.2,phi);
+    
+    for(const auto x : phi)
+      {
+	std::cout << x << std::endl;
+      }
+  }
+
+  {  
+    constexpr Quadrature1D q;  
+    for(const auto x : q.W())
+      {
+	std::cout << x << std::endl;
+      }    
+    for(const auto x : q.P())
+      {
+	std::cout << x << std::endl;
+      }    
+  }
+
+  std::cout << "###" << std::endl;
+  std::valarray<double> mass(0.0,9);
+
+  {
+    QuadraticFiniteElement1D<double> f2;
+    QuadraticFiniteElement1D<double>::ShapeValues phi;
+    QuadraticFiniteElement1D<double>::ShapeValues psi;
+    
+    const auto n = f2.NumShapes();
+    constexpr Quadrature1D q;  
+    constexpr auto w = q.W();
+    constexpr auto p = q.P();
+    constexpr auto qn = q.N();
+    for (int k=0;k<qn;++k)
+      {
+	auto r = p[k];
+	f2.Eval(r,phi);
+	f2.Eval(r,psi);
+	for (int j=0;j<n;++j)
+	  {	  
+	    for (int i=0;i<n;++i)
+	      {		
+		mass[j*n+i] += w[k] * phi[j] * psi[i];
+	      }
+	  }
+      }
+  }
+
+  for (int i=0;i<3;++i)
+    {
+      for (int j=0;j<3;++j)
+	{
+	  std::cout << " " << mass[j*3+i];
+	}
+      std::cout << std::endl;
+    }
+
+
+  using SpaceType = FiniteElementSpace1D<10,QuadraticFiniteElement1D<double>>;
+  SpaceType space1D(1,2,new QuadraticFiniteElement1D<double>());
+#if 0
+  //  Grid1D<30> grid1D(0.0,10.0);
+
+#endif
+
+  const auto numDofs = space1D.NumDofs();
+  std::cout << "numDofs " << numDofs << std::endl;
+  SpaceType::CellToDofs cellToDofs;
+  I*s_dofToCells = new I[numDofs+1];
+  I*dofToCells = new I[3*grid1D.NumCells()];
+
+  for (int i=0;i<numDofs+1;++i)
+    {
+      s_dofToCells[i] =  0;
+    }
+  
+  for (int i=0;i<grid1D.NumCells();++i)
+    {
+      space1D.GetCellToDofs(i,cellToDofs);
+      for(const auto dofIndex : cellToDofs)
+	{
+	  s_dofToCells[dofIndex+1]+=1;
+	}      
+    }
+
+  for (int i=2;i<=numDofs;++i)
+    {
+      s_dofToCells[i]+=s_dofToCells[i-1];
+    }
+  
+  for (int i=0;i<grid1D.NumCells();++i)
+    {
+      space1D.GetCellToDofs(i,cellToDofs);      
+      for(const auto dofIndex : cellToDofs)
+	{
+	  dofToCells[s_dofToCells[dofIndex]] = i;
+	  ++s_dofToCells[dofIndex];
+	}      
+    }
+
+  for (int i=numDofs;i>0;--i)
+    {
+      s_dofToCells[i] = s_dofToCells[i-1];
+    }
+  s_dofToCells[0] = 0;
+
+  
+#if 0
+  for (int i=0;i<numDofs;++i)
+    {
+      std::cout << "line " << i << ", size" <<  s_dofToCells[i+1] - s_dofToCells[i] << std::endl;
+      for (int j=s_dofToCells[i];j<s_dofToCells[i+1];++j)
+	{
+	  std::cout << " "  << dofToCells[j];
+	}
+      std::cout << std::endl;
+    }
+  exit(1);
+#endif
+  
+  //  inline void GetCellToDofs(const unsigned int cellIndex,CellToDofs&c) const
+
+  
+  auto N = 10;
+
+  
+  I An 		= numDofs;
+  I*Ab 		= new I[An+1];
+  I*Aind 	= new I[grid1D.NumCells()*3*3];
+  double * Ax 	= new double[grid1D.NumCells()*3*3];
+
+  I * blank = (I*)calloc(numDofs,sizeof(I));
+  I * select = (I*)malloc(numDofs*sizeof(I));
+  I select_n = 0;
+  Ab[0] = 0;
+  for (int dofIndex=0;dofIndex<numDofs;++dofIndex)
+    {
+      
+      for (int j=s_dofToCells[dofIndex];j<s_dofToCells[dofIndex+1];++j)
+	{
+	  const auto cellIndex = dofToCells[j];
+	  space1D.GetCellToDofs(cellIndex,cellToDofs);
+	  for(const auto jDof : cellToDofs)
+	    {
+	      if (blank[jDof]==0)
+		{
+#if 1
+		  bool found = false;
+		  if (jDof < select[select_n-1])
+		    {
+		      for (int i=0;i<select_n;++i)
+			{
+			  if (jDof < select[i])
+			    {
+			      for (int l=select_n;l>i;--l)
+				{
+				  select[l] = select[l-1];
+				}
+			      found = true;
+			      select[i] = jDof;		  
+			      break;
+			    }
+			}
+		    }
+		  
+		  if (!found)
+		    {
+		      select[select_n] = jDof;
+		    }
+#endif
+		  blank[jDof] = ++select_n;
+		}
+	    }	  
+	}
+      
+      //
+      // sort dof
+      //      
+      Ab[dofIndex+1] = Ab[dofIndex] + select_n;
+      for (int j=0;j<select_n;++j)
+	{
+	  Aind[Ab[dofIndex]+j] = select[j];
+	}
+      
+      for (int j=0;j<select_n;++j)
+	{
+	  blank[select[j]] = 0;
+	}
+      select_n=0;
+      
+    }
+
+  delete[]blank;
+  delete[]select;
+  
+  for (int i=0;i<An;++i)
+    {
+      std::cout << "line " << i << std::endl;
+      for (int j=Ab[i];j<Ab[i+1];++j)
+	{
+	  std::cout << " "  << Aind[j];
+	}
+      std::cout << std::endl;
+    }
+
+
+  
+  TopologicalDimension s = TopologicalDimension::Face;
+  std::cout << s << std::endl;
+  //  std::cout << ++s << std::endl;
+  return 0;
+
+}

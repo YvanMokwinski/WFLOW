@@ -1,0 +1,143 @@
+﻿// This file is part of the CoFlow project. It is subject to the copyright notice in
+// the COPYRIGHT file found in the top-level directory of this distribution. No part
+// of the CoFlow project, including this file, may be copied, modified, propagated
+// or distributed except in agreement with Computer Modelling Group, Ltd.
+
+using System;
+using System.Diagnostics;
+using CoFlow.Sdk.Utility;
+using Drms.Shared.Utility;
+
+namespace Drms.Server.DomainModel.Solvers.Sparse
+{
+
+   /// <summary>
+   /// Implementation of a diagonal matrix.
+   /// </summary>
+   public class DiagonalMatrix
+   {
+      #region Data members
+
+      /// <summary>
+      /// The size of the diagonal matrix.
+      /// </summary>
+      protected readonly Int32 m_size;
+
+      /// <summary>
+      /// The values of the diagonal matrix.
+      /// </summary>
+      protected readonly double[] m_values;
+
+      #endregion
+
+      /// <summary>
+      /// Constructor.
+      /// </summary>
+      /// <param name="size">The size of the diagonal matrix.</param>
+      public DiagonalMatrix(Int32 size)
+      {
+         ValidationUtil.ValidateIntegerArgGreaterThanZero(size, "size");
+         m_size = size;
+         m_values = new double[m_size];
+      }
+
+      /// <summary>
+      /// Constructor.
+      /// </summary>
+      /// <param name="values">The values of the diagonal coefficients.</param>
+      public DiagonalMatrix(double[] values)
+      {
+         ValidationUtil.ValidateArgNotNull(values, "values");
+         m_size = values.Length;
+         m_values = values;
+      }
+
+      /// <summary>
+      /// Get/Set the value of the diagonal coefficient.
+      /// </summary>
+      /// <param name="index">The index of the diagonal coefficient.</param>
+      /// <returns>The value of the diagonal coefficient.</returns>
+      public double this[Int32 index]
+      {
+         get { return m_values[index]; }
+
+         set
+         {
+            Debug.Assert(0 <= index && m_size > index);
+            m_values[index] = value;
+         }
+      }
+
+
+      /// <summary>
+      /// Compute the inverse.
+      /// </summary>
+      /// <param name="minAbsoluteValue">Threshold to apply on the absolute value of the diagonal coefficient,
+      /// the default value is <see cref="MathAndStats.MachinePrecisionDouble"/>.</param>
+      public void Inverse(double minAbsoluteValue = MathAndStats.MachinePrecisionDouble)
+      {
+         ValidationUtil.ValidateNumericArgGreaterThan(minAbsoluteValue,
+                                                      0.0,
+                                                      "minAbsoluteValue");
+         for (Int32 index = 0; index < m_size; ++index)
+         {
+            var v = m_values[index];
+
+            if (((v < 0.0) ? -v : v) < minAbsoluteValue)
+            {
+               v = (v < 0.0) ? -minAbsoluteValue : minAbsoluteValue;
+            }
+
+            m_values[index] = 1.0 / v;
+         }
+      }
+
+      /// <summary>
+      /// Perform the matrix-vector product.
+      /// </summary>
+      /// <param name="transpose">No transpose ('N' or 'n'), Transpose ('T' or 't')</param>
+      /// <param name="py">The output vector.</param>
+      /// <param name="px">The input vector.</param>
+      public void Amux(int transpose,
+                       IntPtr py,
+                       IntPtr px)
+      {
+         Debug.Assert(IntPtr.Zero != py, "The parameter 'py' cannot be null.");
+         Debug.Assert(IntPtr.Zero != px, "The parameter 'px' cannot be null.");
+         
+         unsafe
+         {
+            Amux(transpose,
+                 (double*) py.ToPointer(),
+                 (double*) px.ToPointer());
+         }
+      }
+
+      /// <summary>
+      /// Perform the matrix-vector product.
+      /// </summary>
+      /// <param name="transpose">No transpose ('N' or 'n'), Transpose ('T' or 't')</param>
+      /// <param name="y">The output vector.</param>
+      /// <param name="x">The input vector.</param>
+      private unsafe void Amux(int transpose,
+                               double* y,
+                               double* x)
+      {
+         Debug.Assert(null != y, "The parameter 'y' cannot be null.");
+         Debug.Assert(null != x, "The parameter 'x' cannot be null.");
+         Debug.Assert((transpose == 'N') || (transpose == 'n') || (transpose == 'T') || (transpose == 't'),
+                    "Invalid value of the parameter 'transpose'");
+         if ((transpose == 'N') || (transpose == 'n') || (transpose == 'T') || (transpose == 't'))
+         {
+            for (Int32 index = 0; index < m_size; ++index)
+            {
+               y[index] = x[index] * m_values[index];
+            }
+         }
+       
+      }
+
+
+   }
+
+}

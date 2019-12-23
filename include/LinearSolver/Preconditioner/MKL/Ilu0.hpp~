@@ -1,0 +1,267 @@
+﻿// This file is part of the CoFlow project. It is subject to the copyright notice in
+// the COPYRIGHT file found in the top-level directory of this distribution. No part
+// of the CoFlow project, including this file, may be copied, modified, propagated
+// or distributed except in agreement with Computer Modelling Group, Ltd.
+
+using System;
+using System.Diagnostics;
+using CoFlow.Sdk.Utility;
+using Drms.Shared.Utility;
+
+namespace Drms.Server.DomainModel.Solvers.Sparse
+{
+   using MKLILU0 = MKLWrapper.Preconditioners.ILU0;
+   using MKLILU0Error = MKLWrapper.Preconditioners.ILU0.Error;
+   using MKLIterativeSparseSolversParameters = MKLWrapper.IterativeSparseSolvers.ParametersBase;
+
+   /// <summary>
+   /// Implementation of the Incomplete LU Factorization with level 0 of fill-in.
+   /// </summary>
+   /// <remarks>
+   /// Avoid using this preconditioner with the Conjugate Gradient sparse iterative solver because in general, 
+   /// it produces a non-symmetric resulting matrix even if the original matrix is symmetric.
+   /// </remarks>
+   public class MKLIlu0 : IInverseOperator
+   {
+      #region Read-only data members
+
+      /// <summary>
+      /// The matrix A.
+      /// </summary>
+      private readonly SparseMatrixCSR32 m_A;
+
+      /// <summary>
+      /// The preconditioner.
+      /// </summary>
+      private readonly IUnmanagedArray m_ilu0Values;
+
+      /// <summary>
+      /// Parameter from RCI FGMRES, first initialized by the FGMRES method.
+      /// </summary>
+      private readonly MKLIterativeSparseSolversParameters m_parameters;
+
+      #endregion
+
+      #region Non read-only Data members
+
+      /// <summary>
+      /// Status.
+      /// </summary>
+      private MKLILU0Error m_error;
+
+      #endregion
+
+      #region Constructor
+
+      /// <summary>
+      /// Create an Incomplete LU Factorization preconditioner with a level-0 of fill-in.
+      /// </summary>
+      /// <param name="A">The matrix A from which we need to compute a preconditioner.</param>
+      /// <param name="parameters">Parameters of the RCI FGMRES computations, first initialized by the MKL FGMRES.</param>
+      public MKLIlu0(SparseMatrixCSR32 A,
+                     MKLIterativeSparseSolversParameters parameters)
+      {
+         ValidationUtil.ValidateArgNotNull(A, "A");
+         ValidationUtil.ValidateArgNotNull(parameters, "parameters");
+        
+         //
+         // Assign data members
+         //
+         m_parameters = parameters;
+         m_A = A;
+         m_ilu0Values = UnmanagedArrayFactory.Instance.Create<double>(m_A.NumCoefficients);
+
+         //
+         // ipar[30]
+         // specifies how the routine operates when a zero diagonal element occurs during calculation. 
+         // If this parameter is set to 0 (the default value set by the routine dfgmres_init), then the calculations are stopped 
+         // and the routine returns a non-zero error value. Otherwise, the diagonal element is set to the value of dpar[31] and the calculations continue.
+         // 
+         parameters.ParamIntegers[30] = 1;
+
+         //
+         // specifies a small value, which is compared with the computed diagonal elements. 
+         // When ipar[30] is not 0, then diagonal elements less than dpar[30] are set to dpar[31]. 
+         // The default value is 1.0e-16.
+         //   
+         // Note
+         // This parameter can be set to the negative value, because the calculation uses its absolute value.
+         // If this parameter is set to 0, the comparison with the diagonal element is not performed.
+         //
+         parameters.ParamReals[30] = 1.0e-16;
+
+         //
+         // specifies the value that is assigned to the diagonal element if its value is less 
+         // than dpar[30] (see above). The default value is 1.0e-10.
+         //
+         parameters.ParamReals[31] = 1.0e-10;
+
+      }
+
+      #endregion
+
+      /// <see cref="IInverseOperator.ErrorMessage"/>
+      public string ErrorMessage
+      {
+         get { return MKLILU0.ErrorMessage(m_error); }
+      }
+
+      /// <see cref="IInverseOperator.Compute"/>
+      public void Compute(out bool outHasFailed)
+      {
+         outHasFailed = false;
+         m_error = MKLILU0Error.Completed;
+
+         //
+         // Set the matrix to 1-based indexing.
+         //
+         var indexingSystem = m_A.IndexingSystem;
+         if (indexingSystem == SparseMatrixBase<Int32>.KindOfIndexingSystem.C)
+         {
+            m_A.SwitchIndexingSystem(SparseMatrixBase<Int32>.KindOfIndexingSystem.Fortran);
+         }
+
+         //
+         // Compute the incomplete factorization
+         //
+         MKLILU0.Compute(m_A.Dimension,
+                         m_A.ValuesPtr,
+                         m_A.OffsetsPtr,
+                         m_A.IndicesPtr,
+                         m_ilu0Values.Handle,
+                         m_parameters.ParamIntegers,
+                         m_parameters.ParamReals,
+                         out m_error);
+
+         //
+         // Re-set the matrix to 0-based indexing.
+         //
+         if (indexingSystem == SparseMatrixBase<Int32>.KindOfIndexingSystem.C)
+         {
+            m_A.SwitchIndexingSystem(SparseMatrixBase<Int32>.KindOfIndexingSystem.C);
+         }
+
+         switch (m_error)
+         {
+            case MKLILU0Error.Completed:
+               {
+                  break;
+               }
+            default:
+               {
+                  outHasFailed = true;
+                  break;
+               }
+         }
+
+      }
+
+      /// <see cref="IInverseOperator.SizeOfTemporaryVector"/>>
+      public Int32 SizeOfTemporaryVector
+      {
+         get { return m_A.Dimension; }
+      }
+
+      /// <see cref="IInverseOperator.Apply"/>
+      public unsafe void Apply(Int32 transpose,
+                               IntPtr y,
+                               IntPtr x,
+                               Int32 tmpSize,
+                               IntPtr tmp,
+                               out bool outHasFailed)
+      {
+         Debug.Assert('N' == transpose || 'n' == transpose || 'T' == transpose || 't' == transpose,
+                      "The parameter 'transpose' has a wrong value.");
+
+         Debug.Assert(IntPtr.Zero != y, "The parameter 'y' cannot be null.");
+         Debug.Assert(IntPtr.Zero != x, "The parameter 'x' cannot be null.");
+         Debug.Assert(tmpSize >= SizeOfTemporaryVector, "The parameter 'tmpSize' is too small.");
+         Debug.Assert(IntPtr.Zero != tmp, "The parameter 'tmp' cannot be null.");
+
+         outHasFailed = false;
+         var dimension = m_A.Dimension;
+
+         Int32 L = 'L';
+         Int32 U = 'U';
+         Int32 N = 'N';
+
+         if (m_A.IndexingSystem == SparseMatrixBase<Int32>.KindOfIndexingSystem.Fortran)
+         {
+
+            //
+            // Forward substitution
+            //
+            MKLWrapper.SPBLAS.mkl_dcsrtrsv(&L,
+                                           &N,
+                                           &U,
+                                           &dimension,
+                                           m_ilu0Values.Handle,
+                                           m_A.OffsetsPtr,
+                                           m_A.IndicesPtr,
+                                           x,
+                                           tmp);
+
+
+            //
+            // Backward substitution
+            //
+            MKLWrapper.SPBLAS.mkl_dcsrtrsv(&U,
+                                           &N,
+                                           &N,
+                                           &dimension,
+                                           m_ilu0Values.Handle,
+                                           m_A.OffsetsPtr,
+                                           m_A.IndicesPtr,
+                                           tmp,
+                                           y);
+         }
+         else
+         {
+
+            Debug.Assert(m_A.IndexingSystem == SparseMatrixBase<Int32>.KindOfIndexingSystem.C);
+
+            //
+            // Forward substitution
+            //
+            MKLWrapper.SPBLAS.mkl_cspblas_dcsrtrsv(&L,
+                                                   &N,
+                                                   &U,
+                                                   &dimension,
+                                                   m_ilu0Values.Handle,
+                                                   m_A.OffsetsPtr,
+                                                   m_A.IndicesPtr,
+                                                   x,
+                                                   tmp);
+
+
+            //
+            // Backward substitution
+            //
+            MKLWrapper.SPBLAS.mkl_cspblas_dcsrtrsv(&U,
+                                                   &N,
+                                                   &N,
+                                                   &dimension,
+                                                   m_ilu0Values.Handle,
+                                                   m_A.OffsetsPtr,
+                                                   m_A.IndicesPtr,
+                                                   tmp,
+                                                   y);
+         }
+
+      }
+
+      #region Implementation of the interface IDisposable
+
+      /// <see cref="IDisposable.Dispose"/>>
+      public void Dispose()
+      {
+         // 
+         // Do nothing.
+         //
+      }
+
+      #endregion
+
+   }
+
+}

@@ -1,0 +1,972 @@
+#ifndef __header_LinearSolver_Iterative_MKL_Gmres_hpp__
+#define __header_LinearSolver_Iterative_MKL_Gmres_hpp__
+
+#include "LinearSolver/ILinearOperator.hpp"
+
+#define MKL_ILP64 1
+#include "mkl.h"
+#include "mkl_rci.h"
+
+namespace LinearSolver
+{
+  namespace Iterative
+  {
+    namespace MKL
+    {
+      /// <summary>
+      /// Implementation of the Flexible General Minimal Residual with the Math Kernel Library.
+      /// </summary>
+      class Gmres
+      {
+ 
+      private:
+
+	struct Status
+	{
+	public:
+	  /// <summary>
+	  /// Enumerate the values of the parameter request.
+	  /// </summary>
+	  typedef enum _Value
+	    {
+	      /// <summary>
+	      /// Indicates that the task completed normally and the solution is found and stored in the vector x. 
+	      /// This occurs only if the stopping tests are fully automatic. 
+	      /// For the user defined stopping tests, see the description of the RCI_request= 2 or 4.
+	      /// </summary>
+	      Completed = 0,
+	  
+	      /// <summary>
+	      /// Indicates that the routine was interrupted because the maximum number of iterations was reached, but the relative stopping criterion was not met. 
+	      /// This situation occurs only if you request both tests.
+	      /// </summary>
+	      MaximumNumberOfIterationsReached = -1,
+	  
+	      /// <summary>
+	      /// Indicates that the routine was interrupted because of an attempt to divide by zero. 
+	      /// Usually this happens if the matrix is degenerate or almost degenerate. 
+	      /// However, it may happen if the parameter dpar is altered, or if the method is not stopped when the solution is found.
+	      /// </summary>
+	      AttemptDivideByZero = -10,
+	  
+	      /// <summary>
+	      /// Indicates that the routine was interrupted because it entered an infinite cycle. 
+	      /// Usually this happens because the values ipar[7], ipar[8], ipar[9] were altered outside of the routine, 
+	      /// or the dfgmres_check routine was not called.
+	      /// </summary>
+	      InfiniteCycle = -11,
+
+	      /// <summary>
+	      /// Indicates that the routine was interrupted because errors were found in the method parameters. 
+	      /// Usually this happens if the parameters ipar and dpar were altered by mistake outside the routine.
+	      /// </summary>
+	      InconsitentParameters = -12,
+
+	      /// <summary>
+	      /// Indicates that you must multiply the matrix by rwork[ipar[21] - 1:ipar[21] + n - 2], 
+	      /// put the result in the rwork[ipar[22] - 1:ipar[22] + n - 2], and return control back to the routine dfgmres.
+	      /// </summary>
+	      ApplyMatrixVectorProduct = 1,
+
+	      /// <summary>
+	      /// Indicates that you must perform the stopping tests. If they fail, return control to the dfgmres routine. Otherwise, the FGMRES solution is found, and you can run the fgmres_get routine to update the computed solution in the vector x.
+	      /// </summary>
+	      ApplyStoppingTests = 2,
+
+	      /// <summary>
+	      /// Indicates that you must apply the inverse preconditioner to tmp[ipar[21] - 1:ipar[21] + n - 2], put the result in the tmp[ipar[22] - 1:ipar[22] + n - 2], and return control back to the routine dfgmres.
+	      /// </summary>
+	      ApplyPreconditioner = 3,
+
+	      /// <summary>
+	      /// Indicates that you must check the norm of the currently generated vector. 
+	      /// If it is not zero within the computational/rounding errors, return control to the dfgmres routine. 
+	      /// Otherwise, the FGMRES solution is found, and you can run the dfgmres_get routine to update the computed solution in the vector x.
+	      /// </summary>
+	      CheckTheNormOfTheGeneratedVector = 4
+	    } Value;
+
+
+	  /// <summary>
+	  /// Get the error message related to the status.
+	  /// </summary>
+	  /// <param name="request">The parameter 'request' from the routine.</param>
+	  static std::string GetErrorMessage(const Status::Value request)
+	  {
+	    switch (request)
+	      {
+	      case MaximumNumberOfIterationsReached:
+		{
+		  return
+		    "Indicates that the routine was interrupted because the maximum number of iterations was reached, but the relative stopping criterion was not met. This situation occurs only if you request both tests.";
+		}
+	     
+	      case AttemptDivideByZero:
+		{
+		  return
+		    "Indicates that the routine was interrupted because of an attempt to divide by zero. Usually this happens if the matrix is degenerate or almost degenerate. However, it may happen if the parameter dpar is altered, or if the method is not stopped when the solution is found.";
+		}
+	    
+	      case InfiniteCycle:
+		{
+		  return "Indicates that the routine was interrupted because it entered an infinite cycle. Usually this happens because the values ipar[7], ipar[8], ipar[9] were altered outside of the routine, or the dfgmres_check routine was not called.";
+		}
+	    
+	      case InconsitentParameters:
+		{
+		  return "Indicates that the routine was interrupted because errors were found in the method parameters. Usually this happens if the parameters ipar and dpar were altered by mistake outside the routine.";
+		}
+	    
+	      case Completed:
+		{
+		  return "Completed";
+		}
+	      case ApplyMatrixVectorProduct:
+		{
+		  return "ApplyMatrixVectorProduct";
+		}
+	      case ApplyStoppingTests:
+		{
+		  return "ApplyStoppingTests";
+		}
+	      case ApplyPreconditioner:
+		{
+		  return "ApplyPreconditioner";
+		}
+	      case CheckTheNormOfTheGeneratedVector:
+		{
+		  return "ApplyPreconditioner";
+		}
+	      default:
+		{
+		  int irequest = (int) request;
+		  if (irequest < 0)
+		    {
+		      switch (irequest)
+			{
+			case -10000:
+			  {
+			    return "Indicates that the routine failed to complete the task.";
+			  }
+			default:
+			  {
+			    return "Unknown error";
+			  }
+			}
+		    }
+		  else
+		    {
+		      return "Unknown request value";
+		    }
+		}
+	      }
+	  };
+       
+	};
+
+      private:
+          
+     
+	/// <summary>
+	/// Parameters of the MKL FGMRES Solver.
+	/// </summary>
+	class Parameters
+	{
+	private:
+      
+	  /// <summary>
+	  /// The array of integer parameters.
+	  /// </summary>
+	  I m_ipar[128];
+      
+	  /// <summary>
+	  /// The array of double parameters.
+	  /// </summary>
+	  R m_dpar[128];
+            
+	public:
+      
+	  Parameters()
+	  {
+	    for (int i=0;i<128;++i)
+	      {
+		m_dpar[i] = ((R)0.0);
+	      }
+	    for (int i=0;i<128;++i)
+	      {
+		m_ipar[i] = ((I)0);
+	      }
+	  };
+
+	public:
+       
+	  /// <summary>
+	  /// The array of the integer parameters.
+	  /// </summary>
+	  pI GetParamIntegers()
+	  {
+	    return this->m_ipar;
+	  };
+    
+	  /// <summary>
+	  /// The array of the real parameters.
+	  /// </summary>
+	  pR GetParamReals()
+	  {
+	    return this->m_dpar;
+	  };
+
+    
+
+	  /// <summary>
+	  /// Set the relative tolerance.
+	  /// </summary>
+	  void SetRelativeTolerance(const double value)
+	  {
+	    this->m_dpar[0] = value; 
+	  };
+
+	  /// <summary>
+	  /// Make the residual stopping test automatic.
+	  /// </summary>
+	  void SetAutomaticResidualStoppingTest(const bool value)
+	  {
+	    this->m_ipar[8] = value ? 1 : 0;
+	  };
+	
+	  /// <summary>
+	  /// Set the maximum number of iterations.
+	  /// </summary>
+	  void SetMaximumNumberOfIterations(const I value)
+	  {
+	    this->m_ipar[4] = value;
+	  }
+	
+	  /// <summary>
+	  /// Set the maximum number of non-restarted iterations.
+	  /// </summary>
+	  void SetMaximumNumberOfNonRestartedIterations(const I value)
+	  {
+	    this->m_ipar[14] = value;
+	  };
+        
+	
+	  /// <summary>
+	  /// Get the norm of the orthogonal vector.
+	  /// </summary>
+	  double GetNormOfOrthogonalVector()const
+	  {
+	    return this->m_dpar[6]; 
+	  };
+
+	  /// <summary>
+	  /// Get/Set the threshold of the norm of the orthogonal vector.
+	  /// </summary>
+	  double GetZeroNormThresholdOfOrthogonalVector() const
+	  {
+	    return this->m_dpar[7]; 
+	  };
+
+      
+	  void SetZeroNormThresholdOfOrthogonalVector(const double value) 
+	  {
+	    this->m_dpar[7] = value;
+	  };
+	
+	  /// <summary>
+	  /// Get the index of the source temporary vector.
+	  /// </summary>
+	  I GetIndexOfSourceTemporaryVector()const
+	  {
+	    return this->m_ipar[21] - 1;
+	  };
+	
+	  /// <summary>
+	  /// Get the index of output temporary vector.
+	  /// </summary>
+	  I GetIndexOfOutputTemporaryVector()const
+	  {
+	    return this->m_ipar[22] - 1;
+	  };
+	
+	  /// <summary>
+	  /// Make the user defined stopping test automatic.
+	  /// </summary>
+	  void SetAutomaticUserDefinedStoppingTest(const bool value)
+	  {
+	    this->m_ipar[9] = value ? 1 : 0; 
+	  };
+	
+	  /// <summary>
+	  /// Make the zero norm of the orthogonal vector automatic.
+	  /// </summary>
+	  bool GetAutomaticTestForZeroNormOfOrthogonalVector()
+	  {
+	    return this->m_ipar[11] != 0; 	  
+	  };
+
+	  void SetAutomaticTestForZeroNormOfOrthogonalVector(const bool value)
+	  {
+	    this->m_ipar[11] = value ? 1 : 0;
+	  };
+	
+	  /// <summary>
+	  /// Indicates if the method is preconditioned.
+	  /// </summary>
+	  bool IsPreconditionedMethod()const
+	  {
+	    return this->m_ipar[10] == 1; 
+	  };
+	 
+	  void SetPreconditionedMethod(const bool value)
+	  {	  
+	    this->m_ipar[10] = value ? 1 : 0; 
+	  };
+       
+	  /// <summary>
+	  /// Print information.
+	  /// </summary>
+	  /// <param name="textWriter">The text writer.</param>
+	  void PrintInformation()
+	  {
+	    std::cout << "Some info about the current run of RCI FGMRES method:"<< std::endl;
+	    if (m_ipar[7] != 0)
+	      {
+		std::cout << "   As ipar[7]="<< m_ipar[7]<< ", the automatic test for the maximal number of iterations will be performed"<< std::endl;
+	      }
+	    else
+	      {
+		std::cout << "   As ipar[7]="<< m_ipar[7]<< ", the automatic test for the maximal number of iterations will be skipped"<< std::endl;
+	      }
+	    std::cout << "+++"<< std::endl;
+	    if (0 != m_ipar[8])
+	      {
+		std::cout << "   As ipar[8]="<< m_ipar[8]<< ", the automatic residual test will be performed" << std::endl;
+	      }
+	    else
+	      {
+		std::cout << "   As ipar[8]="<< m_ipar[8]<< ", the automatic residual test will be skipped" << std::endl;
+	      }
+	    std::cout << "+++"<< std::endl;
+	    if (0 != m_ipar[9])
+	      {
+		std::cout << "   As ipar[9]="<< m_ipar[9]<< ", the user-defined stopping test will be requested via RCI_request=2"<< std::endl;
+	      }
+	    else
+	      {
+		std::cout << "   As ipar[9]="<< m_ipar[9]<< ", the user-defined stopping test will not be requested, thus RCI_request will not take the value 2"<< std::endl;
+	      }
+	    std::cout << "+++"<< std::endl;
+	    if (0 != m_ipar[10])
+	      {
+		std::cout << "   As ipar[10]="<< m_ipar[10]<< ", the Preconditioned FGMRES iterations will be performed, thus the preconditioner action will be requested via RCI_request=3"<< std::endl;
+	      }
+	    else
+	      {
+		std::cout << "   As ipar[10]="<< m_ipar[10]<< ", the Preconditioned FGMRES iterations will not be performed, thus RCI_request will not take the value 3"<< std::endl;
+	      }
+	    std::cout << "+++"<< std::endl;
+	    if (0 != m_ipar[11])
+	      {
+		std::cout << "   As ipar[11]="<< m_ipar[11]<< ", the automatic test for the norm of the next generated vector is not equal to zero up to rounding and computational errors will be performed, thus RCI_request will not take the value 4"<< std::endl;
+	      }
+	    else
+	      {
+		std::cout << "   As ipar[11]="<< m_ipar[11]<< ", the automatic test for the norm of the next generated vector is not equal to zero up to rounding and computational errors will be skipped, thus the user-defined test will be requested via RCI_request=4"<< std::endl;
+	      }
+	    std::cout << "+++"<< std::endl;
+	  };
+
+	  /// <summary>
+	  /// The required memory.
+	  /// </summary>
+	  /// <param name="maximumNumberOfNonRestartedIterations">The maximum number of non-restarted iterations.</param>
+	  /// <param name="n">The dimension.</param>
+	  /// <returns>The required memory.</returns>
+	  static I GetRequiredMemory(const int maximumNumberOfNonRestartedIterations, const I n)
+	  {
+	    return ((2 * maximumNumberOfNonRestartedIterations + 1) * n +
+		    maximumNumberOfNonRestartedIterations * (maximumNumberOfNonRestartedIterations + 9) / 2 + 1);
+	  };
+
+       
+	};
+
+     
+      private:
+     
+	/// <summary>
+	/// Initializes the solver.
+	/// </summary>
+	/// <param name="n">INPUT:Sets the size of the problem.</param>
+	/// <param name="request">OUTPUT:Gives information about the result of the routine.</param>
+	/// <param name="parameters">OUTPUT: The parameters. </param>
+	/// <param name="rwork">OUTPUT: Array of size ((2*<paramref name="parameters"/>[14] + 1)*<paramref name="n"/> + <paramref name="parameters"/>[14]*(<paramref name="parameters"/>[14 - 1] + 9)/2 + 1).</param>
+	static void Init(const I 		n,
+			 Status::Value* 	refStatus,
+			 Parameters& 	parameters,
+			 pR 		rwork)
+	{
+	  I ln = n;
+	  I status = (I)*refStatus;      
+	  dfgmres_init(&ln,
+		       NULL,
+		       NULL,
+		       &status,
+		       parameters.GetParamIntegers(),
+		       parameters.GetParamReals(),
+		       rwork);      
+	  *refStatus = (Status::Value)status;
+	};
+
+
+	/// <summary>
+	/// Checks consistency and correctness of the user defined data.
+	/// </summary>
+	/// <param name="parameters">OUTPUT: The parameters. </param>
+	/// <param name="n">INPUT:Sets the size of the problem.</param>
+	/// <param name="rwork">OUTPUT: Array of size ((2*<paramref name="parameters"/>[14] + 1)*<paramref name="n"/> + <paramref name="parameters"/>[14]*(<paramref name="parameters"/>[14] + 9)/2 + 1).</param>       
+	/// <param name="request">OUTPUT: Gives information about result of the routine.</param>
+	static void Check(Parameters&parameters,
+			  const I n,
+			  pR rwork,
+			  Status::Value* refStatus)
+	{
+	  I ln = n;
+	  I status = (I) *refStatus;
+      
+	  dfgmres_check(&ln,
+			NULL,
+			NULL,
+			&status,
+			parameters.GetParamIntegers(),
+			parameters.GetParamReals(),
+			rwork);
+	
+	  *refStatus = (Status::Value) status;
+	};
+
+
+	/// <summary>
+	/// Retrieves the number of the current iteration and updates the solution.
+	/// </summary>
+	/// <param name="parameters">OUTPUT: The parameters. </param>
+	/// <param name="n">INPUT:Sets the size of the problem.</param>
+	/// <param name="sol">OUTPUT: Array of size <paramref name="n"/>. Contains the initial approximation to the solution vector. Normally it is equal to 0 or to <paramref name="rhs"/>.</param>
+	/// <param name="rhs">OUTPUT: Array of size <paramref name="n"/>. Contains the right-hand side vector.</param>
+	/// <param name="request">OUTPUT: Gives information about result of the routine.</param>
+	/// <param name="rwork">INPUT:Array of size ((2*<paramref name="parameters"/>[14] + 1)*<paramref name="n"/> + <paramref name="parameters"/>[14]*(<paramref name="parameters"/>[14] + 9)/2 + 1).</param>
+	/// <param name="itercount">OUTPUT: Contains the value of the current iteration number.</param>
+	static void Get(Parameters&parameters,
+			const I n,
+			pR sol,
+			pR rhs,
+			pR rwork,
+			Status::Value* refStatus,
+			I& itercount)
+	{
+	  I ln = n;
+	  I status = (I)*refStatus;
+      
+	  dfgmres_get(&ln,
+		      sol,
+		      rhs,
+		      &status,
+		      parameters.GetParamIntegers(),
+		      parameters.GetParamReals(),
+		      rwork,
+		      &itercount);
+	
+	  *refStatus = (Status::Value) status;	
+	};
+
+
+	/// <summary>
+	/// Makes the FGMRES iterations.
+	/// </summary>
+	/// <param name="parameters">OUTPUT: The parameters. </param>
+	/// <param name="n">INPUT:Sets the size of the problem.</param>
+	/// <param name="sol">INPUT: Array of size <paramref name="n"/>. Contains the initial approximation to the solution vector. Normally it is equal to 0 or to b.</param>
+	/// <param name="rhs">INPUT: Array of size <paramref name="n"/>. Contains the right-hand side vector.</param>
+	/// <param name="rwork">INPUT/OUTPUT:The working array.</param>
+	/// <param name="request">OUTPUT: Gives information about result of the routine.</param>
+	static inline void Run(Parameters& parameters,
+			       const I n,
+			       pR sol,
+			       cst_pR rhs,
+			       pR rwork,
+			       Status::Value* refStatus)
+	{	
+	  I ln = n;
+	  I status = (I) *refStatus;
+	  dfgmres(&ln,
+		  sol,
+		  (pR)rhs,
+		  &status,
+		  parameters.GetParamIntegers(),
+		  parameters.GetParamReals(),
+		  rwork);
+	  *refStatus = (Status::Value) status;
+	};
+     
+     
+    private:
+      /// <summary>
+      /// Operator for the matrix vector product.
+      /// </summary>
+      ILinearOperator* m_matrixVectorProductOperator;
+     
+      /// <summary>
+      /// The size of the linear system.
+      /// </summary>
+      I m_n;
+     
+      /// <summary>
+      /// The parameters.
+      /// </summary>
+      Parameters m_parameters;
+     
+      /// <summary>
+      /// The required memory for MKL.
+      /// </summary>
+      pR m_rwork;
+     
+      /// <summary>
+      /// The preconditioner.
+      /// </summary>
+      IInverseOperator* m_preconditioner;
+     
+      /// <summary>
+      /// Flag to indicate if any action of the preconditioner has failed.
+      /// </summary>
+      bool m_preconditionerHasFailed;
+     
+      /// <summary>
+      /// Status.
+      /// </summary>
+      Status::Value m_status;
+     
+      /// <summary>
+      /// The error message related to the status.
+      /// </summary>
+      std::string m_errorMessage;
+
+     
+      static const I s_maximumNumberOfNonRestartedIterations = 30;
+     
+      /// <summary>
+      /// Get the required memory to run the MKL Conjugate Gradient method. 
+      /// </summary>
+      /// <param name="size">The size of the linear system to solve.</param>
+      /// <param name="maximumNumberOfNonRestartedIterations">The maximum number of non-restarted iterations.</param>
+      /// <returns>The size of the required array of double.</returns>
+      static I GetRequiredMemory(I size,
+				 I maximumNumberOfNonRestartedIterations = s_maximumNumberOfNonRestartedIterations)
+      {
+	return Parameters::GetRequiredMemory(maximumNumberOfNonRestartedIterations, size);
+      };
+     
+      /// <summary>
+      /// Constructor.
+      /// </summary>
+      /// <param name="size">The size of the linear system to solve.</param>
+      /// <param name="matrixVectorProductOperator">The matrix vector product operator..</param>
+      /// <param name="numMaxIter">The maximum number of iterations.</param>
+      /// <param name="relativeTolerance">The relative tolerance.</param>
+      /// <param name="maximumNumberOfNonRestartedIterations">The maximum number of non-restarted iterations.</param>
+      /// <param name="hasPreconditioner">The matrix vector product operator.</param>
+      Gmres(const I size,
+	    ILinearOperator* matrixVectorProductOperator,
+	    const I numMaxIter,
+	    const double relativeTolerance = 1.0e-6,
+	    const I maximumNumberOfNonRestartedIterations = s_maximumNumberOfNonRestartedIterations,
+	    const bool hasPreconditioner = true)
+      {
+       
+	this->m_matrixVectorProductOperator = matrixVectorProductOperator;
+	this->m_preconditioner = NULL;
+	this->m_n = size;
+	this->m_rwork = new double[GetRequiredMemory(size,maximumNumberOfNonRestartedIterations)];
+
+       
+	this->m_status = Status::Completed;
+       
+	//
+	// Initialize the solver.
+	//
+	Init(size,
+	     &this->m_status,
+	     this->m_parameters,
+	     this->m_rwork);
+       
+	switch (this->m_status)
+	  {
+	  case Status::Completed:
+	    {
+	      break;
+	    }
+	  default:
+	    {
+	      std::cerr << "MKLFlexibleGMRES failed:" << Status::GetErrorMessage(m_status) << std::endl;
+	      exit(1);
+	    }
+	  }
+       
+	//
+	// Personalize the set-up
+	//
+       
+	//
+	// Change the default tolerance.
+	//
+	m_parameters.SetRelativeTolerance(relativeTolerance);
+       
+	//
+	// Set the maximum number of non-restarted iterations.
+	//
+	m_parameters.SetMaximumNumberOfNonRestartedIterations(maximumNumberOfNonRestartedIterations);
+       
+	//
+	// Set the maximum number of iterations. 
+	//
+	m_parameters.SetMaximumNumberOfIterations(numMaxIter);
+       
+	//
+	// Let FGMRES do the test for the zero norm of the orthogonal vector.
+	//
+	m_parameters.SetAutomaticTestForZeroNormOfOrthogonalVector(true);
+       
+	//
+	// Threshold on the value of the zero norm of the orthogonal vector.
+	//
+	m_parameters.SetZeroNormThresholdOfOrthogonalVector(1.0e-10);
+       
+	//
+	// Let FGMRES do the test residual.
+	//
+	m_parameters.SetAutomaticResidualStoppingTest(true);
+       
+	//
+	// Let us taking care of the stopping test.
+	//
+	m_parameters.SetAutomaticUserDefinedStoppingTest(false);
+       
+	//
+	// Has a preconditioner.
+	//
+	m_parameters.SetPreconditionedMethod(hasPreconditioner);
+       
+	Check(this->m_parameters,
+	      this->m_n,
+	      this->m_rwork,
+	      &this->m_status);
+       
+	switch (m_status)
+	  {
+	  case Status::Completed:
+	    {
+	      break;
+	    }
+	  default:
+	    {
+	      std::cerr << "MKL FGMRES has failed when checking parameters "<<std::endl;
+	      exit(1);
+	    }
+	  }
+       
+	//
+	// Print information about the set-up.
+	//
+	m_parameters.PrintInformation();
+       
+      };
+
+     
+
+      /// <see cref="IIterativeSparseLinearSolver.Preconditioner"/>
+      IInverseOperator* GetPreconditioner()
+      {
+	return this->m_preconditioner; 
+      };
+     
+      void SetPreconditioner(IInverseOperator* value)
+      {        
+	this->m_preconditioner = value; 
+      };
+
+      double m_EuclidianNormOfResidual;
+      double GetEuclidianNormOfResidual()const
+      {
+	return this->m_EuclidianNormOfResidual;
+      };
+     
+      void SetEuclidianNormOfResidual(const double value)
+      {
+	this->m_EuclidianNormOfResidual = value;
+      };
+
+      I m_numIterations;
+      I GetNumIterations()const
+      {
+	return this->m_numIterations;
+      };
+      void SetNumIterations(const I value)
+      {
+	this->m_numIterations = value;
+      };
+
+      std::string GetErrorMessage()
+      {
+	if (!this->m_preconditionerHasFailed)
+	  {
+	    this->m_errorMessage = Status::GetErrorMessage(this->m_status);
+	  }
+	return this->m_errorMessage;
+      };
+
+      void Compute(bool *outHasFailed)
+      {
+	*outHasFailed = false;
+	if (this->m_parameters.IsPreconditionedMethod())
+	  {
+	    if (NULL != this->m_preconditioner)
+	      {
+		this->m_preconditioner->Compute(&m_preconditionerHasFailed);
+		if (m_preconditionerHasFailed)
+		  {
+		    *outHasFailed = this->m_preconditionerHasFailed;
+		    // this->m_preconditioner->GetErrorMessage;
+		    m_errorMessage = std::string("The computation of the preconditioner has failed:");
+		  }
+	      }
+	    else
+	      {
+		std::cerr <<"The preconditioner is missing." << std::endl;
+		exit(1);
+	      }
+	  }
+      };
+     
+     
+
+      /// <see cref="IInverseOperator.Compute"/>
+      /// <see cref="IInverseOperator.SizeOfTemporaryVector"/>>
+      I GetSizeOfTemporaryVector() const
+      {
+	if (m_parameters.IsPreconditionedMethod())
+	  {
+	    return m_preconditioner->GetSizeOfTemporaryVector();
+	  }
+	else
+	  {
+	    return 0;
+	  }
+      };
+
+
+      void Apply(const char * transpose,
+		 pR y,
+		 cst_pR x,
+		 const I tmpSize,
+		 pR tmp,
+		 bool* outHasFailed)
+      {
+       
+	*outHasFailed = false;
+       
+	I numApplyPreconditioner = 0;
+	I numMatrixVectorProduct = 0;
+	//
+	// Checks consistency and correctness of the user defined data. 
+	//
+	this->m_status = Status::Completed;
+       
+	//
+	// Makes the FGMRES iterations.
+	//
+       
+      StateRun:
+       
+	Run(this->m_parameters,
+	    this->m_n,
+	    y,
+	    x,
+	    this->m_rwork,
+	    &this->m_status);
+       
+	switch (m_status)
+	  {
+	  case Status::Completed:
+	    {
+	      break;
+	    }
+	   
+	  case Status::ApplyMatrixVectorProduct:
+	    {
+	      ++numMatrixVectorProduct;
+	      m_matrixVectorProductOperator->Apply(transpose,
+						   this->m_rwork + m_parameters.GetIndexOfOutputTemporaryVector() * sizeof(double),
+						   this->m_rwork + m_parameters.GetIndexOfSourceTemporaryVector() * sizeof(double));
+	      goto StateRun;
+	    }
+	   
+	  case Status::ApplyPreconditioner:
+	    {
+#if 0
+	      Debug.Assert(null != m_preconditioner);
+#endif
+	      ++numApplyPreconditioner;
+#if 0
+	      Console.WriteLine("apply preconditioner");
+#endif
+	     
+	      m_preconditioner->Apply(transpose,
+				      this->m_rwork + m_parameters.GetIndexOfOutputTemporaryVector() * sizeof(double),
+				      this->m_rwork + m_parameters.GetIndexOfSourceTemporaryVector() * sizeof(double),
+				      tmpSize,
+				      tmp,
+				      &this->m_preconditionerHasFailed);
+	     
+	      if (!m_preconditionerHasFailed)
+		{
+		  goto StateRun;
+		}
+	     
+	      *outHasFailed = true;
+	      m_errorMessage = std::string("The application of the preconditioner has failed:") + m_preconditioner->GetErrorMessage();
+	      break;
+	    }
+	   
+	  case Status::CheckTheNormOfTheGeneratedVector:
+	    {
+#if 0
+	      Debug.Assert(!m_parameters.AutomaticTestForZeroNormOfOrthogonalVector,
+			   "The setup of FGMRES is wrong, it says that this step should be automatic.");
+#endif
+	      if (m_parameters.GetNormOfOrthogonalVector() > m_parameters.GetZeroNormThresholdOfOrthogonalVector())
+		{
+		  goto StateRun;
+		}
+	      break;
+	    }
+	   
+	  case Status::MaximumNumberOfIterationsReached:
+	    {
+	      *outHasFailed = true;
+	      break;
+	    }
+	   
+	  case Status::ApplyStoppingTests:
+	    {
+	     
+	      std::cerr << "Apply stopping tests is not yet implemented" << std::endl;
+	      exit(1);
+	    }
+	   
+	  default:
+	    {
+	      *outHasFailed = true;
+	      break;
+	    }
+	  }
+
+#if 0
+	DebugVerbose(string.Format("Status value:{0}, outHasFailed value: {1}", m_status, outHasFailed));
+	Console.WriteLine(
+			  "Status value:{0}, outHasFailed value: {1}, numMatrixVectorProduct {2}, numApplyPreconditioner {3}",
+			  m_status,
+			  outHasFailed,
+			  numMatrixVectorProduct,
+			  numApplyPreconditioner);
+#endif
+	switch (m_status)
+	  {
+	  case Status::MaximumNumberOfIterationsReached:
+	  case Status::Completed:
+	    {
+	     
+	      Status::Value requestGet = m_status;
+	      I itercount = 0;
+	      Get(m_parameters,
+		  m_n,
+		  y,
+		  (pR)x,
+		  m_rwork,
+		  &requestGet,
+		  itercount);
+#if 0	     
+	      Debug.Assert(Status::Completed == requestGet);
+#endif	     
+	      this->SetNumIterations(itercount);
+#if 0
+	      LinearSystemUtils.ComputeResidual(transpose,
+						m_n,
+						y,
+						x,
+						m_rwork,
+						m_matrixVectorProductOperator);
+#endif
+	      static const I n1 = 1;
+	      this->SetEuclidianNormOfResidual(dnrm2(&m_n, m_rwork,&n1));
+#if 0
+	      DebugVerbose(string.Format("NumIter  = {0}, EuclidianNormOfResidual = {1}", itercount,
+					 EuclidianNormOfResidual));
+	     
+	      Console.WriteLine("NumIter  = {0}, EuclidianNormOfResidual = {1}",
+				itercount,
+				EuclidianNormOfResidual);
+#endif
+	     
+	      break;
+	    }
+	   
+	  default:
+	    {
+	      this->SetEuclidianNormOfResidual(1e30);
+	      *outHasFailed = true;
+	      break;
+	    }
+	  }
+       
+      };
+
+     
+#if 0
+
+      /// <see cref="IIterativeSparseLinearSolver.MaximumNumberOfIterations"/>
+      I MaximumNumberOfIterations;
+     
+      /// <summary>
+      /// Get the parameters.
+      /// </summary>
+      Parameters *GetParameters()
+      {
+	return this->m_parameters;
+      };
+     
+      /// <summary>
+      /// Get the Euclidian norm of the residual after computation.
+      /// </summary>
+      /// <remarks>
+      /// If an error has occurred, the value is set to 1e30.
+      /// </remarks>
+     
+      /// <summary>
+      /// The number of iterations after computation.
+      /// </summary>
+
+      /// <see cref="IInverseOperator.Apply"/>
+     
+      /// <see cref="IInverseOperator.ErrorMessage"/>
+
+#endif
+
+      };
+    
+    };
+  
+  };
+
+};
+
+#endif

@@ -1,0 +1,130 @@
+﻿// This file is part of the CoFlow project. It is subject to the copyright notice in
+// the COPYRIGHT file found in the top-level directory of this distribution. No part
+// of the CoFlow project, including this file, may be copied, modified, propagated
+// or distributed except in agreement with Computer Modelling Group, Ltd.
+
+using System;
+using System.Diagnostics;
+using CoFlow.Sdk.Utility;
+using Drms.Shared.Utility;
+
+namespace Drms.Server.DomainModel.Solvers.Sparse
+{
+   /// <summary>
+   /// Implementation of the Jacobi preconditioner.
+   /// </summary>
+   /// <remarks>
+   /// For a matrix A, the Jacobi preconditioner P is chosen to be the diagonal of matrix A: P:=Diagonal(A).
+   /// The application of the Jacobi preconditioner is y:= P^{-1} x, which is straightforward since P is diagonal.
+   /// </remarks>
+   public class JacobiPreconditioner : DiagonalMatrix, IInverseOperator
+   {
+      #region Data members
+
+      /// <summary>
+      /// The matrix A.
+      /// </summary>
+      private readonly SparseMatrixCSR32 m_A;
+
+      /// <summary>
+      /// The minimum of the absolute value when computing the inverse.
+      /// </summary>
+      private readonly double m_minAbsoluteValue;
+
+      #endregion
+
+      #region Constructor
+
+      /// <summary>
+      /// Constructor.
+      /// </summary>
+      /// <param name="A">The sparse matrix.</param>
+      /// <param name="minAbsoluteValue">The minimum of the absolute value when computing the inverse.</param>
+      public JacobiPreconditioner(SparseMatrixCSR32 A, 
+         double minAbsoluteValue = MathAndStats.MachinePrecisionDouble)
+         : base(null != A ? A.Dimension : 1)
+      {
+         ValidationUtil.ValidateArgNotNull(A, "A");
+         ValidationUtil.ValidateNumericArgNonNegative(minAbsoluteValue,
+                                                      "minAbsoluteValue");
+         m_A = A;
+         m_minAbsoluteValue = minAbsoluteValue;
+      }
+
+      #endregion
+
+      #region Implementation of the interface ILinearOperator
+
+      /// <see cref="IInverseOperator.Compute"/>
+      public void Compute(out bool outHasFailed)
+      {
+         //
+         // Basically, it cannot fail.
+         //
+         outHasFailed = false;
+
+         //
+         // Extract the diagonal.
+         //
+         m_A.ExtractDiagonal(m_values);
+
+         //
+         // Compute the inverse.
+         //
+         Inverse(m_minAbsoluteValue);
+      }
+
+      /// <see cref="IInverseOperator.SizeOfTemporaryVector"/>>
+      public Int32 SizeOfTemporaryVector
+      {
+         get { return 0; }
+      }
+
+      /// <see cref="IInverseOperator.Apply"/>>
+      public void Apply(Int32 transpose,
+                        IntPtr y,
+                        IntPtr x,
+                        Int32 tmpSize,
+                        IntPtr tmp,
+                        out bool outHasFailed)
+      {
+         Debug.Assert(IntPtr.Zero != y,
+                      "The parameter 'y' cannot be null.");
+         Debug.Assert(IntPtr.Zero != x,
+                      "The parameter 'x' cannot be null.");
+         Debug.Assert('N' == transpose || 'n' == transpose || 'T' == transpose || 't' == transpose,
+                      "The parameter 'transpose' is invalid.");
+
+         //
+         // We do not care about the temporary vector.
+         //
+
+         outHasFailed = false;
+         Amux(transpose,
+              y,
+              x);
+
+      }
+
+      /// <see cref="IInverseOperator.ErrorMessage"/>>
+      public string ErrorMessage
+      {
+         get { return "No error message available, this preconditioner should never fail."; }
+      }
+
+      #endregion
+
+      #region Implementation of the interface IDisposable
+
+      /// <see cref="IDisposable.Dispose"/>>
+      public void Dispose()
+      {
+         // 
+         // Do nothing.
+         //
+      }
+
+      #endregion
+
+   }
+}

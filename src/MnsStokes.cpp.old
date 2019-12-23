@@ -1,0 +1,800 @@
+#include <signal.h>
+#include <pthread.h>
+#include "Cmdline.h"
+#include "nsGLOBAL.h"
+#include "nsPBLM.h"
+#include "Monitor.h"
+#include "ns_sys.h"
+
+
+static void ns_main_signal(int sigid) 
+{
+
+  fflush(stdout);
+  fflush(stderr);
+  fprintf(stderr,"\n");
+  Monitor_errmsg(0,"ns_main_signal:Unexpected error"); 
+  switch(sigid) {
+    case SIGABRT:
+      Monitor_errmsg(0,"ns_main_signal:<Abnormal stop>");  
+      exit(1);
+      break;
+    case SIGFPE:
+      Monitor_errmsg(0,"ns_main_signal:<Floating-point exception>"); 
+      exit(1);
+      break;
+    case SIGILL:
+      Monitor_errmsg(0,"ns_main_signal:<Illegal instruction>"); exit(1);break;
+    case SIGSEGV:
+      Monitor_errmsg(0,"ns_main_signal:<Segmentation fault>");  exit(1);break;
+    case SIGTERM:
+      {
+	Monitor_errmsg(0,"<Program killed>2");  
+	exit(1);
+	break;
+      }
+    case SIGINT:
+      {
+	Monitor_errmsg(0,"<Program killed>");  
+	exit(1);
+	break;
+      }
+  default:
+    {
+      Monitor_errmsg(0,"  ??? unrecognized error");  
+      exit(1);
+      break;
+    }
+  }
+
+}
+
+static void ns_main_atexit()
+{
+#ifndef NDEBUG
+  fprintf(stderr,"ns_main_atexit ...\n");
+#endif
+
+#ifndef NDEBUG
+  fprintf(stderr,"ns_main_atexit done.\n");
+#endif
+}
+
+void  Global_checkError(const char * 	filename_,
+			const int 	fileline_,
+			STR 		errmsg_,
+			Err*		err_)
+{
+  if (err_[0])
+    {
+      Monitor_errmsg(0,"ERROR DETECTED");
+      Monitor_errmsg(0,"ERROR CODE      : '%s' (err="efmt")",eErr_get_string(err_[0]),err_[0]);
+      Monitor_errmsg(0,"ERROR MESSAGE   : '%s'",errmsg_);
+      Monitor_errmsg(0,"ERROR FROM FILE : '%s'",filename_);
+      Monitor_errmsg(0,"ERROR AT LINE   : %d",fileline_);
+      exit(err_[0]);
+    }
+}
+
+#define CHECK_ERROR(_errmsg,_err) Global_checkError(__FILE__,__LINE__,_errmsg,_err)
+
+
+class SolverCanal
+{
+public:
+
+  SolverCanal()
+  {
+
+  };
+
+  virtual ~SolverCanal()
+  {
+  };
+
+
+  void Run(void * usrptr_)
+  {
+    eStateSolver job = __eStateSolver_ERROR;
+    use_integrator(&job,
+		   usrptr_);
+  };
+  
+protected:
+
+
+
+  static void boundaryf(cst_pI 		n_,
+			cst_pI 		xm_,
+			pR     		x_,
+			cst_pI       	xoff_,
+			cst_pI       	gl_m_,
+			cst_pR       	gl_,
+			cst_pI       	gloff_,
+			cst_pI       	cod_,
+			cst_pR       	t_,
+			void * 		usrptr_)
+  {
+    I i;
+    for (i=0;i<n_[0];++i)
+    {
+      x_[i] = gl_[gloff_[0]+i];
+#if 1
+      if (x_[i]>0.0)
+	x_[i]=1.0;
+      else if (x_[i]<0.0)
+	x_[i]=0.0;
+      else
+	x_[i]=0.5;
+#endif
+#if 0
+      ns_heaviside(global[0].params.iinfo[__ens_iinfo_heaviside],1,&x_[i],&ns_rv[__ens_rv_eps]);
+#endif
+    }
+  };
+
+  static void boundaryu(cst_pI 		n_,
+			cst_pI 		xm_,
+			pR     		x_,
+			cst_pI       	xoff_,
+			cst_pI       	gl_m_,
+			cst_pR       	gl_,
+			cst_pI       	gloff_,
+			cst_pI       	cod_,
+			cst_pR       	t_,
+			void * 		usrptr_)
+  {
+    I i;
+    for (i=0;i<n_[0];++i)
+      {
+	const R x = gl_[i];
+	const R y = gl_[gloff_[0]+i];
+	if (y>0.5)
+	  {
+	    x_[i] = ((((R)0.5)-y)*(y-1.0)*((R)16.0));
+	    if (x_[i]<0.0)
+	      {
+		printf("AAAAAAAAAAAA %e %e %e\n",x_[i],x,y);
+		exit(1);
+	      }
+	  }
+	else
+	  {
+	    x_[i] = ((((R)0.5)-y)*(y)*((R)16.0));
+	    if (x_[i]<0.0)
+	      {
+		printf("AAAAAAAAAAAA222 %e %e %e\n",x_[i],x,y);
+		exit(1);
+	      }
+	  }
+	x_[xoff_[0]+i] = ((R)0.0);
+      }
+  };
+  
+  static void use_integrator(eStateSolver job_[1],
+			     void * 	usrptr_)
+  {
+
+    pGlobal Z = (pGlobal)usrptr_;
+    static const I dim = ((I)_dim);
+    pParameters const Params	= Global_get_Parameters(Z);
+    pTimeReadOnly const gTimeInfo	= GlobalReadOnly_get_Time(Z);
+
+
+    pSparseStokes M = &Z->sparseStokes;
+
+    const I 	rwork_n			= Z->required_rwork_n;
+    const I 	iwork_n			= Z->required_iwork_n;
+    pR 		rwork			= (pR)malloc((rwork_n+1)*sizeof(R));
+    pI 		iwork			= (pI)malloc((iwork_n+1)*sizeof(I));
+
+    Params->method_transient_scheme[__eKindEquation_VELOCITY]	= __eTransientMethod_NO;
+    Params->method_transient_scheme[__eKindEquation_TRANSPORT]	= __eTransientMethod_NO;
+    const ns_mesh*mesh = (const ns_mesh*)Z->mesh_usrptr;
+    const I nelm  = ns_mesh_nelm(mesh);
+    const I nddlu = Z->nddlu;
+#if 0
+    const R 	current_t 		= Z->ruser[ruser_t];
+    const I 	nddlp 			= Z->nddlp;
+#endif
+    pVariables variables = Global_get_Variables(Z);
+    job_[0] 				= __eStateSolver_ERROR;
+    L 	we_continue 		= __emnsYES;
+    while (we_continue)    
+      {
+	Global_run(//&global[iproc_],
+		   Z,
+		   job_,
+		   &rwork_n,
+		   rwork,
+		   &iwork_n,
+		   iwork);
+#ifndef NDEBUG      
+	printf("---> job_[0] = "efmt"\n",job_[0]);
+#endif            
+	switch(job_[0])
+	  {
+	  case __eStateSolver_slip_velocity_symbolic:
+	    {
+	      M->nddls_dirichlet = 0;
+	      break;
+	    }
+	  
+	  case __eStateSolver_dirichlet_dg:
+	    {
+#if 0
+	      pTimeReadOnly const gTimeInfo	= cst_Global_get_Time(Z);
+	      R uvw[128];
+	      R loc[128];
+	      R pos[128];
+	      if (0)
+		memset(Z->dg_rhs,0,sizeof(R)*Z->nddlelmdg*nelm);
+#endif
+	      { I jelm;
+		for (jelm=0;jelm<nelm;++jelm)
+		  {
+		    { I jadj;
+		      for (jadj=0;jadj<3;++jadj)
+			{
+			  I kelm = mesh->adj[3*jelm+jadj];
+			  if (kelm==0)
+			    {
+			      if (Z->ddlcod[Z->ddlcnc[jelm*6+3+jadj]-1]==23)
+				{
+
+#ifdef TONTON
+				  const I N = ns_dg_fluxelm_boundary_get_coo(&global[iproc_],jelm,jadj,pos);
+#if 0
+				  I i;
+				  for (i=0;i<N;++i){printf("%e %e\n",pos[i],pos[N+i]);}
+#endif
+				
+				  boundaryu(&N,&dim,uvw,&N,&dim,pos,&N,NULL,&gTimeInfo->t,NULL);
+				  boundaryf(&N,&negal1,loc,&negal1,&dim,pos,&N,NULL,&gTimeInfo->t,NULL);
+
+				  ns_dg_fluxelm_boundary(&global[iproc_],&mregal1,jelm,jadj,Z->dg_rhs,loc,uvw);
+				
+				  {
+				    I i;
+				    for (i=0;i<N;++i)
+				      {
+					loc[i] = 1.0-loc[i];
+				      }
+				  }
+
+				  ns_dg_fluxelm_boundary(&global[iproc_],&mregal1,jelm,jadj,Z->dg_rhs2,loc,uvw);
+#endif
+				}
+			    }
+			} }
+		  } }
+	      break;
+	    }
+	  
+	  case __eStateSolver_initial_condition_dg:
+	    {
+#if 0
+	      R loc[128];
+	      R pos[128];
+	      { I j;
+		for (j=0;j<nelm;++j)
+		  {
+		    const I N = ns_dg_projectionelm_get_coo(jelm,pos);
+		    { I k;
+		      for (k=0;k<N;++k)
+			{
+			  loc[k] = pos[N+k];
+			} }
+		    ns_dg_projectionelm(&mregal1,jelm,rwork,loc);
+		  } }
+#endif
+	      break;
+	    }
+	  
+	  case __eStateSolver_initial_condition:
+	    {
+	      /* DO NOTHING */
+	      break;
+	    }
+	  
+	  case __eStateSolver_dirichlet_marker:
+	    {
+	      /* DO NOTHING */
+	      break;
+	    }
+	  
+	  case __eStateSolver_dirichlet_marker_symbolic:
+	    {
+	      /* DO NOTHING */
+	      break;
+	    }	    
+
+	  case __eStateSolver_dirichlet_velocity_symbolic:
+	    {
+	      M->nddlu_dirichlet = 0;
+	      M->nddlv_dirichlet = 0;
+	      { I i;
+		for (i=0;i<nddlu;++i)
+		  {
+
+		    if ( 
+			(Z->ddlcod[i]==1) 
+			OR (Z->ddlcod[i]==2)
+			OR (Z->ddlcod[i]==3)
+			OR (Z->ddlcod[i]==4)
+			OR (Z->ddlcod[i]==5)
+			OR (Z->ddlcod[i]==12)
+			OR (Z->ddlcod[i]==34)
+			OR (Z->ddlcod[i]==45)
+			OR (Z->ddlcod[i]==23) )
+		      {
+			M->ddlu_dirichlet[M->nddlu_dirichlet++] = i;
+		      }
+
+		    if ( 
+			(Z->ddlcod[i]==1) 
+			OR (Z->ddlcod[i]==2)
+			OR (Z->ddlcod[i]==3)
+			OR (Z->ddlcod[i]==4)
+			OR (Z->ddlcod[i]==5)
+			OR (Z->ddlcod[i]==51)
+			OR (Z->ddlcod[i]==12)
+			OR (Z->ddlcod[i]==34)
+			OR (Z->ddlcod[i]==45)
+			OR (Z->ddlcod[i]==23) )
+		      {
+			M->ddlv_dirichlet[M->nddlv_dirichlet++] = i;
+		      }
+
+#if 0
+		    if ( (Z->ddlcod[i]==1) OR (Z->ddlcod[i]==2)OR(Z->ddlcod[i]==3)OR(Z->ddlcod[i]==4)OR(Z->ddlcod[i]==12)OR(Z->ddlcod[i]==34)OR(Z->ddlcod[i]==23)OR(Z->ddlcod[i]==41) )
+		      {
+			M->ddlv_dirichlet[M->nddlv_dirichlet++] = i;
+		      }
+#endif
+		  } } 
+	      break;	      
+	    }
+
+
+	  case __eStateSolver_dirichlet_pressure_symbolic:
+	    {	      
+	      /* 
+		 DO NOTHING
+		 BUT SPECIFY NO DOF IS SPECIFIED DIRICHLET 
+	      */
+	      M->nddlp_dirichlet = 0;
+
+#if 0
+	      { I i;
+		for (i=0;i<nddlp;++i)
+		  {
+		    if ( (ddlcod[i]==1) )
+		      {
+			++M->nddlp_dirichlet;
+			M->ddlp_dirichlet[0] = i;
+			break;
+		      }
+		  } }
+#endif	      
+	      break;
+	    }
+	    	    
+	  case __eStateSolver_dirichlet_velocity:
+	    {
+	      const eVariable variable_u = __eVariable_U;
+	      pR vu = Variables_get(variables,&variable_u,&negal0);
+	      pR vv = vu + Z->nddlu;
+
+	      { I i;
+		for (i=0;i<M->nddlu_dirichlet;++i)
+		  {
+		    const I k = M->ddlu_dirichlet[i];
+
+		    if( ( (Z->ddlcod[k]==23)OR(Z->ddlcod[k]==2)OR(Z->ddlcod[k]==3))
+			OR
+			( (Z->ddlcod[k]==34)OR(Z->ddlcod[k]==3)OR(Z->ddlcod[k]==4)) )
+		      {
+			R uu[3];
+			boundaryu(&negal1,&dim,uu,&negal1,&dim,Z->ddlcoo+k*2,&negal1,NULL,&gTimeInfo->t,NULL);
+			/*		      printf("%e\n",uu[0]-*(hdl->u+k));*/
+			vu[k] =uu[0];
+
+
+			/*		      *(hdl->v+k)=uu[1];*/
+#if 0
+			Z->u[k] = (0.5-Z->ddlcoo[k*2+1])*(Z->ddlcoo[k*2+1]+0.5)*regal4;
+#endif
+			/*		      Z->u[k] = (regal1-Z->ddlcoo[k*2+1])*(Z->ddlcoo[k*2+1]+regal1)*regal4;*/
+
+
+#if 0
+			if (Z->ddlcoo[k*2+1]<0.0)
+			  hdl->u[k] = -(0.5+Z->ddlcoo[k*2+1])*(Z->ddlcoo[k*2+1])*regal4*regal4;
+			else
+			  hdl->u[k] = (0.5-Z->ddlcoo[k*2+1])*(Z->ddlcoo[k*2+1])*regal4*regal4*2.0;
+#endif
+		      }
+#if 0
+		    else
+		      {
+			*(hdl->u+k)=0.0;
+		      }
+#endif
+		  } }
+
+	      { I i;
+		for (i=0;i<M->nddlv_dirichlet;++i)
+		  {
+		    const I k = M->ddlv_dirichlet[i];
+		    //		  hdl->v[k] = regal0;
+		    vv[k] = regal0;
+		  } }      
+	      break;
+	    }
+
+	  case __eStateSolver_dirichlet_pressure:
+	    {
+#if 0
+	      { I i;
+		for (i=0;i<nddlp_dirichlet;++i)
+		  {
+		    const I k = ddlp_dirichlet[i];
+		    p[k] = 1.0;
+		  } }
+#endif
+	      break;
+	    }
+	  
+	  case __eStateSolver_exit:
+	    {
+	      we_continue = __emnsNO;
+	      break;
+	    }
+	  case __eStateSolver_ERROR:
+	    {
+	      we_continue = __emnsNO;
+#if 0
+	      ns_errmsg("nsPBLM_canal:nsGLOBAL_run failed");
+#endif
+	      break;
+	    }
+	  case __eStateSolver_ALL:
+	    {
+	      we_continue = __emnsNO;
+#if 0
+	      ns_errmsg("nsPBLM_canal:nsGLOBAL_run unexpected job");
+#endif
+	      break;
+	    }
+	  }       	      
+      }    
+    free(rwork);
+  };
+
+
+
+
+  
+};
+
+
+class Solver
+{
+protected:
+  Cmdline m_cmdline;
+  pParametersReadOnly m_parameters;
+
+  pGlobal m_solver;
+  ns_mesh m_mesh;
+public:
+  Solver(int 		argc,
+	 const char**	argv,
+	 STR 		errmsg_,
+	 Err*		err_)
+  {
+    
+    //
+    // Initialization of the command line
+    //
+    
+    Cmdline_def (&m_cmdline,argc,argv);    
+
+
+    I nproc=1;
+    if (!Cmdline_get_integer(&m_cmdline,"-n",
+			     &nproc))
+      {
+	Monitor_warn(0,"set nproc to 1");
+	nproc=1;
+      }
+
+    m_solver = (pGlobal)calloc(1,sizeof(nsGLOBAL_ST));
+    //
+    // MAIN
+    //
+    {
+    
+      Global_main(m_solver,
+		  &m_cmdline,
+		  errmsg_,
+		  err_);
+
+      CHECK_ERROR(errmsg_,
+		  err_);
+    
+    }
+  
+    m_parameters = GlobalReadOnly_get_Parameters(m_solver);    
+
+    const L verbose = ParametersReadOnly_getl(m_parameters,
+					      __ens_linfo_verbose);
+  
+    //
+    // READ MESH
+    //
+    {
+      if (verbose)
+	{
+	  Monitor_msg(0,"ReadMesh ..?");
+	}  
+
+      ns_mesh_read(&m_mesh,
+		   errmsg_,
+		   err_,
+		   "%s.p%.2lld.mesh",
+		   argv[1],
+		   0);
+    
+      CHECK_ERROR(errmsg_,
+		  err_);
+    
+      if (verbose)
+	{
+	  Monitor_msg(0,"ReadMesh Success.");
+	}  
+    }
+
+  };
+  
+  virtual ~Solver()
+  {
+    
+  };
+
+
+  void Precompute(STR 		errmsg_,
+		  Err*		err_)
+  {
+    const L verbose = ParametersReadOnly_getl(m_parameters,
+					      __ens_linfo_verbose);
+    if (verbose)
+      {
+	Monitor_msg(0,"Precompute ..?");
+      }
+    
+    Global_precompute(m_solver,
+		      &m_mesh,
+		      errmsg_,
+		      err_);
+
+    CHECK_ERROR(errmsg_,
+		err_);
+    
+    if (verbose)
+      {
+	Monitor_msg(0,"Precompute Success.");
+      }
+
+  };
+
+
+
+  void Compute(STR 		errmsg_,
+	       Err*		err_)
+  {
+
+    //
+    // COMPUTE
+    //
+    const L verbose = ParametersReadOnly_getl(m_parameters,__ens_linfo_verbose);
+    
+    if (verbose)
+      {
+	Monitor_msg(0,"Run ..?");
+      }    
+
+
+    
+    SolverCanal solverCanal;
+
+    solverCanal.Run(m_solver);
+    
+    if (verbose)
+      {
+	Monitor_msg(0,"Run Success.");
+      }
+    
+  };
+  
+  
+};
+
+void ns_main(int 		argc,
+	     const char**	argv,
+	     STR 		errmsg_,
+	     Err*		err_)
+{  
+  atexit(ns_main_atexit);
+  signal(SIGABRT,ns_main_signal);
+  signal(SIGFPE,ns_main_signal);
+  signal(SIGILL,ns_main_signal);
+  signal(SIGSEGV,ns_main_signal);
+  signal(SIGTERM,ns_main_signal);
+  signal(SIGINT,ns_main_signal);
+
+  err_[0] = __eErr_no;
+  ns_mesh mesh;
+
+  //
+  // Initialization of the command line
+  //
+  Cmdline cmdline;
+  Cmdline_def (&cmdline,argc,argv);
+  
+  I nproc=1;
+  if (!Cmdline_get_integer(&cmdline,"-n",
+			   &nproc))
+    {
+      Monitor_warn(0,"set nproc to 1");
+      nproc=1;
+    }
+
+  pGlobal solver = (pGlobal)calloc(1,sizeof(nsGLOBAL_ST));
+  //
+  // MAIN
+  //
+  {
+    
+    Global_main(solver,
+		&cmdline,
+		errmsg_,
+		err_);
+
+    CHECK_ERROR(errmsg_,
+		err_);
+    
+  }
+  
+  pParametersReadOnly const parameters = GlobalReadOnly_get_Parameters(solver);    
+
+  const L verbose = ParametersReadOnly_getl(parameters,
+					    __ens_linfo_verbose);
+  
+  //
+  // READ MESH
+  //
+  {
+    if (verbose)
+      {
+	Monitor_msg(0,"ReadMesh ..?");
+      }  
+
+    ns_mesh_read(&mesh,
+		 errmsg_,
+		 err_,
+		 "%s.p%.2lld.mesh",
+		 argv[1],
+		 0);
+    
+    CHECK_ERROR(errmsg_,
+		err_);
+    
+    if (verbose)
+      {
+	Monitor_msg(0,"ReadMesh Success.");
+      }  
+  }
+  
+  //
+  // PRECOMPUTE
+  //
+  {
+    if (verbose)
+      {
+	Monitor_msg(0,"Precompute ..?");
+      }
+    
+    Global_precompute(solver,
+		      &mesh,
+		      errmsg_,
+		      err_);
+
+    CHECK_ERROR(errmsg_,
+		err_);
+    
+    if (verbose)
+      {
+	Monitor_msg(0,"Precompute Success.");
+      }
+  }
+
+  //
+  // COMPUTE
+  //
+  {
+    if (verbose)
+      {
+	Monitor_msg(0,"Run ..?");
+      }    
+
+    eStateSolver job = __eStateSolver_ERROR;
+
+    nsPBLM_run(parameters->sinfo[__ens_sinfo_pblmname],
+	       &job,
+	       solver,
+	       errmsg_,
+	       err_);
+    
+    CHECK_ERROR(errmsg_,
+		err_);
+    
+    if (verbose)
+      {
+	Monitor_msg(0,"Run Success.");
+      }
+  }
+  
+}
+
+
+
+
+int main(int 		argc,
+	 const char**	argv)
+{
+
+  //
+  // Set up the monitor
+  //
+  Monitor_def(0,
+	      argv[0],
+	      MonitorMode_STD);
+  {
+    STR errmsg;
+    Err err;
+
+    Solver solver(argc,
+		  argv,
+		  errmsg,
+		  &err);
+
+    solver.Precompute	(errmsg,
+			 &err);
+
+    
+    solver.Compute	(errmsg,
+			 &err);
+
+    
+    return err;
+		
+  }  
+#if 0
+  //
+  // Call main
+  // 
+  {
+    STR errmsg;
+    Err err;
+    ns_main(argc,
+	    argv,
+	    errmsg,
+	    &err);
+    
+    return err;
+  }
+#endif
+
+  return 0;
+}

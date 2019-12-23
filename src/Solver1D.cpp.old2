@@ -1,0 +1,1372 @@
+#include <iostream>
+#include <chrono>
+#include <valarray>
+#include <array>
+#include "Sparse.h"
+#include "LinearSolver/Direct/MKL/Pardiso.hpp"
+#include "Blas.hpp"
+
+
+class SparsityPattern
+{
+  /**\brief number of rows */
+private:I 		m_n;
+  /**\brief number of columns */
+private:I 		m_m;
+  /**\brief number of coefficient */
+private:I 		m_nc;
+  /**\brief row bandwith */
+private:I 		m_band_row;
+  /**\brief col bandwith */
+private:I 		m_band_col;
+  /**\brief format */
+private:I 		m_format;
+  /**\brief begin index */
+private: pI   	m_b;
+  /**\brief indices */
+private: pI   	m_i;
+  /**\brief indicate if the owner */
+private: bool 	m_owner;
+
+public:inline SparsityPattern(const I 		format_,
+			      const I 		n_,
+			      const I 		m_,
+			      const I 		nc_,
+			      pI 		b_,
+			      pI 		i_,
+			      const bool	owner_)
+  : m_n(n_),
+    m_m(m_),
+    m_nc(nc_),
+    m_b(b_),
+    m_i(i_),
+    m_owner(owner_)
+  {
+  };
+
+public: inline I GetN() const noexcept
+  {
+    return this->m_n;
+  };
+
+public: inline I GetM() const noexcept
+  {
+    return this->m_m;
+  };
+
+public: inline I GetNC() const noexcept
+  {
+    return this->m_nc;
+  };
+
+public: inline pI GetB() const noexcept
+  {
+    return this->m_b;
+  };
+  
+public: inline pI GetI() const noexcept
+  {
+    return this->m_i;
+  };
+
+public: inline I Find(const I i_,const I j_) const noexcept
+  {
+    if (m_format==1)
+      {
+	for (I i=m_b[i_];i<m_b[i_+1];++i)
+	  {
+	    if (m_i[i-1]==j_+1)
+	      {
+		return i-1;
+	      }
+	  }
+	return -1;
+      }
+    else
+      {
+	for (I i=m_b[i_];i<m_b[i_+1];++i)
+	  {
+	    if (m_i[i]==j_)
+	      {
+		return i;
+	      }
+	  }
+	return -1;
+      }
+  };
+  
+};
+
+template <typename real_t> class SparseMatrix
+{
+private: const SparsityPattern * m_sparsityPattern;
+private: Blas::VectorHandle<real_t> m_x;
+  
+public: SparseMatrix(const SparsityPattern * sparsityPattern_)
+  : m_sparsityPattern(sparsityPattern_),
+    m_x(m_sparsityPattern->GetNC())    
+  {
+  };
+
+  inline bool Ass(const I	i_,
+		  const I	j_,
+		  const real_t	x_) noexcept
+  {
+    const I where = m_sparsityPattern->Find(i_,j_);
+    if (where>0)
+      {
+	this->m_x[where] += x_;
+	return true;
+      }
+    else
+      {
+	return false;
+      }
+  };
+  
+  inline SparseMatrix& operator = (const real_t value_) noexcept
+  {
+    this->m_x = value_;
+  };
+};
+
+
+
+
+#if 0
+template <typename _derivedClass> struct Traits_CRTP_FiniteElement
+{    
+  // float_type;
+};
+
+template <typename _derivedClass> class CRTP_FiniteElement
+{
+  
+public: inline CRTP_FiniteElement(const CRTP_FiniteElement<_derivedClass>&) = delete;   
+private: inline const _derivedClass & asImp() const { return static_cast<const _derivedClass&>(*this); }    
+private: inline  _derivedClass & asImp()  { return static_cast<_derivedClass&>(*this); }  
+protected: inline CRTP_FiniteElement(){};  
+protected:  typedef Traits_CRTP_FiniteElement<_derivedClass> Traits;
+protected:  typedef typename Traits::real_t real_t;
+public:
+
+  inline I GetNumShapes() const noexcept
+  {
+    return asImp().GetNumShapes();
+  };
+  
+  inline void GetLocalCoordinates(const char * transpose_,
+				  real_t res[],
+				  const I ld_) const noexcept
+  {
+    asImp().GetLocalCoordinates(transpose_,
+				rst_,
+				ld_);
+  };
+  
+  inline void Eval(const I 		n_,
+		   const char * 	rtranspose_,
+		   const real_t		r_[],
+		   const I   		roff_,
+		   const char * 	phitranspose_,
+		   real_t 		phi_[],
+		   const I   		phioff_)  const noexcept
+  {
+    asImp().Eval(n_,
+		 rtranspose_,
+		 r_,
+		 roff_,
+		 phitranspose_,
+		 phi_,
+		 phioff_);
+  };
+
+  inline void EvalDerivatives(const I 			n_,
+			      const char * 		rtranspose_,
+			      const real_t		r_[],
+			      const I   		roff_,
+			      const char * 		phitranspose_,
+			      real_t 			phi_[],
+			      const I   		phioff_)  const noexcept
+  {
+    asImp().EvalDerivatives(n_,
+			    rtranspose_,
+			    r_,
+			    roff_,
+			    phitranspose_,
+			    phi_,
+			    phioff_);
+  };
+
+};
+#endif
+
+enum struct TopologicalDimension
+{
+  Point=0,
+    Edge=1,
+    Face = 2,
+    Volume = 3
+    };
+
+
+std::ostream& operator<<(std::ostream&s_,
+			 const TopologicalDimension& faceType_)
+{
+  switch(faceType_)
+    {
+      case TopologicalDimension::Point:
+	{
+	  s_ << "Point";
+	  break;
+	}
+      case TopologicalDimension::Edge:
+	{
+	  s_ << "Edge";
+	  break;
+	}
+      case TopologicalDimension::Face:
+	{
+	  s_ << "Face";
+	  break;
+	}
+      case TopologicalDimension::Volume:
+	{
+	  s_ << "Volume";
+	  break;
+	}
+
+      }
+    return s_;
+  };
+
+
+
+//using I = long long int;
+
+class FiniteElementSpaceLinear1D
+{
+public:
+  inline   FiniteElementSpaceLinear1D(const unsigned int n,const double x0,const double xn) noexcept
+    : m_size(n+1), m_x(n+1)
+  {
+    m_size = n+1;    
+    double dx = (xn - x0) / n;
+    m_x[0] = x0;
+    for (unsigned int i=1;i<=n;++i)
+      {
+	m_x[i] = x0 + dx * i;
+      }
+    m_x[n] = xn;
+  };
+
+  inline   const std::valarray<double>& Coordinates() const noexcept  
+  {
+    return m_x;
+  };
+  
+  inline   unsigned int NumNodes() const noexcept  
+  {
+    return m_size;
+  };
+  
+  inline   unsigned int NumCells() const noexcept 
+  {
+    return m_size-1;
+  };
+  
+  inline   double GetNodeCoordinates(const unsigned int i) const noexcept  
+  {
+    return m_x[i];
+  };
+  
+#if 0
+  inline   void GetCoordinates(const unsigned int i,std::array<double,2>&x) const
+  {
+    x[0] = m_x[i];
+    x[1] = m_x[i+1];
+  };
+#endif
+  
+  template <typename array_t> inline  void GetCoordinates(const unsigned int i,array_t&x) const
+  {
+    x[0] = m_x[i];
+    x[1] = m_x[i+1];
+  };
+
+  
+
+  
+private:
+
+
+  
+  unsigned int m_size;
+  std::valarray<double> m_x;
+};
+
+
+
+
+template <typename real_t> class LinearFiniteElement1D
+{
+public:
+  LinearFiniteElement1D()
+  {
+  };
+  using ShapeReal_Ts = std::array<double,2>;
+
+  inline unsigned int NumShapes() const noexcept
+  {
+    return 2;
+  };
+
+  inline void Eval(const unsigned int 	n_,
+		   const char * 	rtranspose_,
+		   const real_t		r_[],
+		   const unsigned int   roff_,
+		   const char * 	phitranspose_,
+		   real_t 		phi_[],
+		   const unsigned int   phioff_)  const noexcept
+  {   
+    if (phitranspose_[0] == 'N')
+      {
+	if (rtranspose_[0] == 'N')
+	  {
+	    for (unsigned int i=0;i<n_;++i)
+	      {
+		Eval(&r_[i*roff_],
+		     1,
+		     &phi_[phioff_*i],
+		     1);
+	      }
+	  }
+	else
+	  {
+	    for (unsigned int i=0;i<n_;++i)
+	      {
+		Eval(&r_[i],
+		     roff_,
+		     &phi_[phioff_*i],
+		     1);
+	      }
+	  }
+      }
+    else
+      {
+	if (rtranspose_[0] == 'N')
+	  {
+	    for (unsigned int i=0;i<n_;++i)
+	      {
+		Eval(&r_[i*roff_],
+		     1,
+		     &phi_[i],
+		     phioff_);
+	      }
+	  }
+	else
+	  {
+	    for (unsigned int i=0;i<n_;++i)
+	      {
+		Eval(&r_[i],
+		     roff_,
+		     &phi_[i],
+		     phioff_);
+	      }
+	  }
+      }
+  };
+
+
+  static constexpr real_t s_half = real_t(0.5);
+  static constexpr real_t s_one = real_t(1.0);
+
+  inline void Eval(const real_t r_[],
+		   const unsigned int roff_,
+		   real_t phi_[],
+		   const unsigned int phioff_)  const noexcept
+  {
+    const real_t r = r_[0*roff_];
+    phi_[phioff_*0] = (s_one - r)*s_half;
+    phi_[phioff_*1] = (s_one + r)*s_half;
+  };
+
+#if 0  
+  inline void Eval(double r,ShapeValues& phi)  const noexcept
+  {
+    //    phi[0] = ;
+    //    phi[1] = ;
+  };
+
+  inline void DEval(double r,ShapeValues& dphi) const noexcept
+  {
+    dphi[0] = -0.5;
+    dphi[1] = 0.5;
+  };
+#endif
+};
+
+
+template <typename value> class QuadraticFiniteElement1D
+{
+public:
+  QuadraticFiniteElement1D()
+  {
+  };
+  using ShapeValues = std::array<value,3>;
+  static constexpr unsigned int NbShapes = 3;
+  inline unsigned int NumShapes() const noexcept
+  {
+    return 3;
+  };
+
+  inline void GetLocalCoordinates(double res[]) const noexcept
+  {
+    res[0] = -1.0e0;
+    res[1] = 1.0e0;
+    res[2] = 0.0;
+  };
+  
+  static constexpr value s_half = value(0.5);
+  static constexpr value s_one = value(1.0);
+  static constexpr value s_two = value(2.0);
+  
+  inline void Eval(const unsigned int 	n_,
+		   const char * 	rtranspose_,
+		   const value		r_[],
+		   const unsigned int   roff_,
+		   const char * 	phitranspose_,
+		   value 		phi_[],
+		   const unsigned int   phioff_)  const noexcept
+  {   
+    if (phitranspose_[0] == 'N')
+      {
+	if (rtranspose_[0] == 'N')
+	  {
+	    for (unsigned int i=0;i<n_;++i)
+	      {
+		Eval(&r_[i*roff_],
+		     1,
+		     &phi_[phioff_*i],
+		     1);
+	      }
+	  }
+	else
+	  {
+	    for (unsigned int i=0;i<n_;++i)
+	      {
+		Eval(&r_[i],
+		     roff_,
+		     &phi_[phioff_*i],
+		     1);
+	      }
+	  }
+      }
+    else
+      {
+	if (rtranspose_[0] == 'N')
+	  {
+	    for (unsigned int i=0;i<n_;++i)
+	      {
+		Eval(&r_[i*roff_],
+		     1,
+		     &phi_[i],
+		     phioff_);
+	      }
+	  }
+	else
+	  {
+	    for (unsigned int i=0;i<n_;++i)
+	      {
+		Eval(&r_[i],
+		     roff_,
+		     &phi_[i],
+		     phioff_);
+	      }
+	  }
+      }
+  };
+
+  
+  inline void Eval(const value r_[],
+		   const unsigned int roff_,
+		   value phi_[],
+		   const unsigned int phioff_)  const noexcept
+  {
+    const value r = r_[0*roff_];
+    phi_[phioff_*0] = s_half*r*(r-s_one);
+    phi_[phioff_*1] = s_half*r*(r+s_one);
+    phi_[phioff_*2] = s_one-r*r;
+  };
+
+  inline void Eval(const value& r,ShapeValues& phi)  const noexcept
+  {
+    phi[0] = s_half*r*(r-s_one);
+    phi[1] = s_half*r*(r+s_one);
+    phi[2] = s_one-r*r;
+  };
+
+  inline void DEval(const value& r,ShapeValues& dphi) const noexcept
+  {
+    dphi[0] = s_half*(s_two*r-s_one);
+    dphi[2] = -s_two*r;
+    dphi[1] = s_half*(s_two*r+s_one);
+  };
+
+};
+
+
+template <typename value> class LagrangeFiniteElement1D8
+{
+public:
+  LagrangeFiniteElement1D8()
+  {
+  };
+  using ShapeValues = std::array<value,8>;
+  static constexpr unsigned int NbShapes = 8;
+  inline unsigned int NumShapes() const noexcept
+  {
+    return 8;
+  };
+
+  
+  inline void GetLocalCoordinates(double res[]) const noexcept
+  {
+   
+    res[0] = -1.0e0;
+    res[1] = 1.0e0;
+    res[2] = -7.142857142857143e-1;
+    res[3] = -4.285714285714286e-1;
+    res[4] = -1.428571428571429e-1;
+    res[5] = 1.428571428571429e-1;
+    res[6] = 4.285714285714286e-1;
+    res[7] = 7.142857142857143e-1;
+  };
+
+
+  inline double E(int i,value res[],const value& r)const
+  {
+    double s = 1.0;
+    double q = 1.0;
+    for (int j=0;j<8;++j)
+      {
+	if (i!=j)
+	  {
+	    s*=(r-res[j]);
+	  }
+      }
+    
+    for (int j=0;j<8;++j)
+      {
+	if (i!=j)
+	  {
+	    q*=(res[i]-res[j]);
+	  }
+      }
+    return s/q;
+  };
+
+
+
+  
+  inline void Eval(const value& r,ShapeValues& phi)  const noexcept
+  {
+    value res[8];
+    GetLocalCoordinates(res);
+    for (int i=0;i<8;++i)
+      {
+	phi[i] = E(i,res,r);
+      }
+  };
+
+  inline void DEval(const value& r,ShapeValues& dphi) const noexcept
+  {
+    std::cerr << "errror"  << std::endl;
+    exit(1);
+  };
+
+};
+
+template <typename value> class LegendreFiniteElement1D8
+{
+public:
+  LegendreFiniteElement1D8()
+  {
+  };
+  using ShapeValues = std::array<value,8>;
+  static constexpr unsigned int NbShapes = 8;
+  inline unsigned int NumShapes() const noexcept
+  {
+    return 8;
+  };
+
+  
+  inline void GetLocalCoordinates(value res[]) const noexcept
+  {
+
+#if 1
+    for (int i=0;i<8;++i)
+      {
+	res[i] = -cos(i*acos(-1.0)/7.0);
+      }    
+#endif
+
+    double a = res[1];
+    double b = res[7];
+    res[1] = b;
+    res[7]=a;
+    
+#if 0
+    res[0] = -1.0e0;
+    res[1] = 1.0e0;
+
+    res[2] = -9.32469514203152e-1;
+    res[3] = -6.612093864662645e-1;
+    res[4] = -2.386191860831969e-1;
+    res[5] = 2.386191860831969e-1;
+    res[6] = 6.612093864662645e-1;
+    res[7] = 9.32469514203152e-1;
+#endif
+  };
+
+
+  inline double E(int i,value res[],const value& r) const
+  {
+    double s = 1.0;
+    double q = 1.0;
+    for (int j=0;j<8;++j)
+      {
+	if (i!=j)
+	  {
+	    s*=(r-res[j]);
+	  }
+      }
+    
+    for (int j=0;j<8;++j)
+      {
+	if (i!=j)
+	  {
+	    q*=(res[i]-res[j]);
+	  }
+      }
+    return s/q;
+  }
+  
+  inline void Eval(const value& r,ShapeValues& phi)  const noexcept
+  {
+    double res[8];
+    GetLocalCoordinates(res);
+    for (int i=0;i<8;++i)
+      {
+
+	phi[i] = E(i,res,r);
+      }
+  };
+
+  inline void DEval(const value& r,ShapeValues& dphi) const noexcept
+  {
+    std::cerr << "errror"  << std::endl;
+    exit(1);
+  };
+
+};
+
+
+
+template <typename value> class LegendreFiniteElement1D
+{
+public:
+  LegendreFiniteElement1D()
+  {
+  };
+  using ShapeValues = std::array<value,5>;
+  static constexpr unsigned int NbShapes = 5;
+  inline unsigned int NumShapes() const noexcept
+  {
+    return 5;
+  };
+
+  
+  inline void GetLocalCoordinates(double res[]) const noexcept
+  {
+    res[0] = -1.0e0;
+    res[1] = 1.0e0;
+    res[2] = -7.745966692414834e-1;
+    res[3] = 0.0e0;
+    res[4] = 7.745966692414834e-1;   
+  };
+  
+  inline void Eval(const value& r,ShapeValues& phi)  const noexcept
+  {
+    double res[5];
+    GetLocalCoordinates(res);
+    
+    phi[0] = (r-res[1])*(r-res[2])*(r-res[3])*(r-res[4]) / ( (res[0]-res[1])*(res[0]-res[2])*(res[0]-res[3])*(res[0]-res[4]) );
+    phi[1] = (r-res[0])*(r-res[2])*(r-res[3])*(r-res[4]) / ( (res[1]-res[0])*(res[1]-res[2])*(res[1]-res[3])*(res[1]-res[4]) );
+    phi[2] = (r-res[0])*(r-res[1])*(r-res[3])*(r-res[4]) / ( (res[2]-res[0])*(res[2]-res[1])*(res[2]-res[3])*(res[2]-res[4]) );
+    phi[3] = (r-res[0])*(r-res[1])*(r-res[2])*(r-res[4]) / ( (res[3]-res[0])*(res[3]-res[1])*(res[3]-res[2])*(res[3]-res[4]) );
+    phi[4] = (r-res[0])*(r-res[1])*(r-res[2])*(r-res[3]) / ( (res[4]-res[0])*(res[4]-res[1])*(res[4]-res[2])*(res[4]-res[3]) );
+
+  };
+
+  inline void DEval(const value& r,ShapeValues& dphi) const noexcept
+  {
+    std::cerr << "errror"  << std::endl;
+    exit(1);
+  };
+
+};
+
+
+  
+template <typename value> class CubicFiniteElement1D
+{
+public:
+  CubicFiniteElement1D()
+  {
+  };
+  using ShapeValues = std::array<value,5>;
+  static constexpr unsigned int NbShapes = 5;
+  inline unsigned int NumShapes() const noexcept
+  {
+    return 5;
+  };
+
+  
+  inline void GetLocalCoordinates(double res[]) const noexcept
+  {
+    res[0] = -1.0e0;
+    res[1] = 1.0e0;
+    res[2] = -5.0e-1;
+    res[3] = 0.0e0;
+    res[4] = 5.0e-1;
+  };
+  
+  inline void Eval(const value& r,ShapeValues& phi)  const noexcept
+  {
+    phi[0] = 1.666666666666667e-1*r*(1.0e0*r*(1.0e0*r*(4.0e0*r-4.0e0)-1.0e0)+1.0e0);
+    phi[1] = 1.666666666666667e-1*r*(1.0e0*r*(1.0e0*r*(4.0e0*r+4.0e0)-1.0e0)-1.0e0);    
+    phi[2] = 3.333333333333333e-1*r*(1.0e0*r*(1.0e0*r*(4.0e0-8.0e0*r)+8.0e0)-4.0e0);
+    phi[3] = 1.0e0*r*r*(4.0e0*r*r-5.0e0)+1.0e0;
+    phi[4] = 3.333333333333333e-1*r*(1.0e0*r*(1.0e0*r*(-8.0e0*r-4.0e0)+8.0e0)+4.0e0);
+  };
+
+  inline void DEval(const value& r,ShapeValues& dphi) const noexcept
+  {
+    std::cerr << "errror"  << std::endl;
+    exit(1);
+  };
+
+};
+
+
+
+
+
+class Quadrature1D
+{
+public:
+  constexpr Quadrature1D()
+  {
+
+  };
+
+  constexpr unsigned int N() const noexcept
+  {
+    return 8;
+  };
+  
+  constexpr std::array<double,8> W() const noexcept
+  {
+    return m_w;
+  };
+
+  constexpr std::array<double,8> P() const noexcept
+  {
+    return m_p;
+  };
+  
+private:
+
+  static constexpr std::array<double,8> m_w{{
+      1.012285362903763e-1,
+	2.223810344533745e-1,
+	3.137066458778873e-1,
+	3.62683783378362e-1,
+	3.62683783378362e-1,
+	3.137066458778873e-1,
+	2.223810344533745e-1,
+	1.012285362903763e-1}};
+  
+  static constexpr std::array<double,8> m_p{{
+      -9.602898564975362e-1,
+  -7.966664774136267e-1,
+  -5.25532409916329e-1,
+  -1.834346424956498e-1,
+  1.834346424956498e-1,
+  5.25532409916329e-1,
+  7.966664774136267e-1,
+9.602898564975362e-1
+      }};
+
+#if 0
+  static constexpr std::array<double,5> m_w{{
+      2.369268850561891e-1,
+	4.786286704993665e-1,
+	5.688888888888889e-1,
+	4.786286704993665e-1,
+	2.369268850561891e-1}};
+  
+  static constexpr std::array<double,5> m_p{{
+      -9.06179845938664e-1,
+	-5.384693101056831e-1,
+	0.0,
+	5.384693101056831e-1,
+	9.06179845938664e-1}};
+#endif
+
+};
+
+
+template <typename F> class FiniteElementSpace1D
+{
+
+public:
+
+
+  
+  using CellToDofs = std::array<I,F::NbShapes>;
+
+  FiniteElementSpace1D(FiniteElementSpaceLinear1D* grid_,F * f)
+    : m_grid(grid_),
+      m_f(f),
+      m_numDofs(1 + (f->NumShapes()-1) * grid_->NumCells()),
+      m_cnc(grid_->NumCells() * f->NumShapes())
+  {
+    const auto nf = f->NumShapes();
+    const auto numCells = m_grid->NumCells();
+    for (unsigned int cellIndex=0;cellIndex<numCells;++cellIndex)
+      {
+	m_cnc[nf*cellIndex + 0] = cellIndex;
+	m_cnc[nf*cellIndex + 1] = cellIndex + 1;
+	for(unsigned int i=1;i<nf-1;++i)
+	  {
+	    m_cnc[nf*cellIndex + 1 + i] = numCells + cellIndex * (nf-2) + i;
+	  }	
+	//	m_cnc[nf*cellIndex + (nf-1)] = cellIndex+1;
+      }
+
+    m_numDofs = m_grid->NumCells()+1 + (nf-2) * numCells;
+#if 0
+    for (unsigned int cellIndex=0;cellIndex<numCells;++cellIndex)
+      {
+	for(int i=0;i<nf;++i)
+	  {
+	    std::cout << " " << m_cnc[nf*cellIndex + i];
+	  }
+	std::cout << std::endl;
+      }
+#endif
+  };
+
+  inline double GetDofCoordinates(const unsigned int i) const noexcept  
+  {
+    if (i<m_grid->NumCells()+1)
+      {
+	return m_grid->GetNodeCoordinates(i);
+      }
+    else
+      {
+	std::array<double,2> x;
+	auto k = i - (m_grid->NumCells()+1) ;
+	auto cellIndex = k / (m_f->NumShapes()-2);
+	auto j = k % (m_f->NumShapes()-2);
+	m_grid->GetCoordinates(cellIndex,x);
+	double res[32];
+	m_f->GetLocalCoordinates(res);
+	double h = res[2+j]*0.5+0.5;
+	return x[0]*(1.0-h)+x[1]*h;
+      }
+  };
+  
+  inline I NumDofs() const noexcept
+  {
+    return  m_numDofs;
+  };
+
+  inline void GetCellToDofs(const unsigned int cellIndex,CellToDofs&c) const
+  {
+    const auto nf = m_f->NumShapes();
+    for(unsigned int i=0;i<nf;++i)
+      {
+	c[i] = m_cnc[nf*cellIndex+i];
+      }
+  };
+
+  inline I GetDofToCells(const unsigned int dofIndex_,pI cellIndices)
+  {
+    I n = s_dofToCells[dofIndex_+1]-s_dofToCells[dofIndex_];
+    for (I i=0;i<n;++i)
+      {
+	cellIndices[i] = dofToCells[s_dofToCells[dofIndex_+i]];
+      }
+    return n;
+  };
+  
+  void BuildDof2Cells()
+  {
+    CellToDofs cellToDofs;
+    const auto numDofs =  NumDofs();
+    s_dofToCells = new I[numDofs+1];
+    dofToCells = new I[m_cnc.size()];
+    
+    for (int i=0;i<numDofs+1;++i)
+      {
+	s_dofToCells[i] =  0;
+      }
+    
+    for (unsigned int i=0;i<m_grid->NumCells();++i)
+      {
+	GetCellToDofs(i,cellToDofs);
+	for(const auto dofIndex : cellToDofs)
+	  {
+	    s_dofToCells[dofIndex+1]+=1;
+	  }      
+      }
+    
+    for (int i=2;i<=numDofs;++i)
+      {
+	s_dofToCells[i]+=s_dofToCells[i-1];
+      }
+    
+    for (unsigned int i=0;i<m_grid->NumCells();++i)
+      {
+	GetCellToDofs(i,cellToDofs);      
+	for(const auto dofIndex : cellToDofs)
+	  {
+	    dofToCells[s_dofToCells[dofIndex]] = i;
+	    ++s_dofToCells[dofIndex];
+	  }      
+      }
+    
+    for (int i=numDofs;i>0;--i)
+      {
+	s_dofToCells[i] = s_dofToCells[i-1];
+      }
+    s_dofToCells[0] = 0;    
+  };
+
+  
+  pSparse BuildEndomorphism() 
+  {
+    BuildDof2Cells();
+
+    const auto numDofs =  NumDofs();
+    I An 		= numDofs;
+    I*Ab 		= new I[An+1];
+    I*Aind 		= new I[m_grid->NumCells()*m_f->NumShapes()*m_f->NumShapes()];
+    
+    CellToDofs cellToDofs;
+    I * blank = (I*)calloc(numDofs,sizeof(I));
+    I * select = (I*)malloc(numDofs*sizeof(I));
+    I select_n = 0;
+    Ab[0] = 0;
+    I cellIndices[128];
+    for (unsigned int dofIndex=0;dofIndex<numDofs;++dofIndex)
+      {
+	I nu = GetDofToCells(dofIndex,cellIndices);
+	for (I j=0;j<nu;++j)             
+	  {
+	    const auto cellIndex = cellIndices[j];
+	    GetCellToDofs(cellIndex,cellToDofs);
+	    for(const auto jDof : cellToDofs)
+	      {
+		if (blank[jDof]==0)
+		  {
+		    if (select_n>0)
+		      {
+
+			bool found = false;
+			if (jDof < select[select_n-1])
+			  {
+			    for (int i=0;i<select_n;++i)
+			      {
+				if (jDof < select[i])
+				  {
+				    for (int l=select_n;l>i;--l)
+				      {
+					select[l] = select[l-1];
+				      }
+				    found = true;
+				    select[i] = jDof;		  
+				    break;
+				  }
+			      }
+			  }
+		  
+			if (!found)
+			  {
+			    select[select_n] = jDof;
+			  }
+		      }
+		    else
+		      {
+			select[select_n] = jDof; 
+		      }
+		  
+		    blank[jDof] = ++select_n;
+		  }
+	      }	  
+	  }
+      
+	//
+	// sort dof
+	//      
+	Ab[dofIndex+1] = Ab[dofIndex] + select_n;
+	for (int j=0;j<select_n;++j)
+	  {
+	    Aind[Ab[dofIndex]+j] = select[j];
+	  }
+      
+	for (int j=0;j<select_n;++j)
+	  {
+	    blank[select[j]] = 0;
+	  }
+	select_n=0;
+      
+      }
+  
+    free(blank);
+    free(select);
+
+    auto a= Sparse_build(numDofs,
+			numDofs,
+			Ab[numDofs],
+			Ab,
+			Aind,
+			new double[Ab[numDofs]]);
+   Sparse_fortran_indexation(a);    
+    return a;
+  };
+  
+private:
+  FiniteElementSpaceLinear1D* m_grid;
+  F* m_f;
+  I m_numDofs;
+  std::valarray<I> m_cnc;
+  pI s_dofToCells;
+  pI dofToCells;
+
+};
+
+double f(double x)
+{
+  return 1.0 / (1.0 + 25.0*x*x);
+}
+int main(int argc,char**argv)
+{
+
+  
+  //  using SpaceType = FiniteElementSpace1D<LegendreFiniteElement1D<double>>;
+  using SpaceType = FiniteElementSpace1D<QuadraticFiniteElement1D<double>>;
+  const unsigned int numCells = atol(argv[1]);
+  FiniteElementSpaceLinear1D grid1D(numCells,
+				    -4.0,
+				    4.0);
+
+  std::cout.precision(15);
+  std::cout.setf(std::ios::scientific);
+  
+  
+  SpaceType space1D(&grid1D,
+		    new QuadraticFiniteElement1D<double>());
+		    //		    new QuadraticFiniteElement1D<double>());
+  
+  const auto numDofs = space1D.NumDofs();
+  SpaceType::CellToDofs cellToDofs;
+  
+  pSparse endomorphism = space1D.BuildEndomorphism();
+
+
+  Blas::VectorHandle<double> rhs(numDofs);
+
+  double* X = new double[numDofs];
+  Blas::VectorHandle<double> cellCoordinates(2);
+  //    std::array<double,2> cellCoordinates;
+  QuadraticFiniteElement1D<double> f2;
+  LinearFiniteElement1D<double> f1;
+    QuadraticFiniteElement1D<double>::ShapeValues phi;
+    QuadraticFiniteElement1D<double>::ShapeValues psi;
+    const auto numShapes = f2.NumShapes();
+  {
+    Sparse_clear(endomorphism);
+
+
+    //    CubicFiniteElement1D<double> f2;
+    //    CubicFiniteElement1D<double>::ShapeValues phi;
+    //    CubicFiniteElement1D<double>::ShapeValues psi;
+      
+    
+    std::valarray<double> mass(0.0,numShapes*numShapes);    
+    //    std::valarray<double> localrhs(0.0,numShapes);
+    //    double * localrhs = new double[numShapes];
+    //    std::valarray<double> localrhs(0.0,numShapes);
+    
+    constexpr Quadrature1D q;  
+    constexpr auto weights = q.W();
+    constexpr auto positions = q.P();
+    constexpr auto qn = q.N();    
+    const auto numCells = grid1D.NumCells();
+
+    rhs = double(0.0);
+    
+    double* shapesEvaluation = new double[qn * numShapes];    
+    f2.Eval(qn,
+	    "No transposed",
+	    positions.data(),
+	    1,
+	    "No transposed",
+	    shapesEvaluation,
+	    numShapes);
+
+    Blas::MatrixHandle<double> shapesEvaluationBuilder(numShapes,
+						       qn,
+						       shapesEvaluation,
+						       numShapes);
+
+#if 0
+    double* weightedShapesEvaluation = new double[qn * numShapes];    
+    f2.Eval(qn,
+	    "No transposed",
+	    positions.data(),
+	    1,
+	    "No transposed",
+	    weightedShapesEvaluation,
+	    numShapes);
+
+    I numShapes2 = numShapes;
+    I n1 = 1;
+    for (unsigned int i=0;i<qn;++i)
+      {
+       
+	dscal(&numShapes2,&weights[i],&weightedShapesEvaluation[numShapes * i],&n1);
+      }
+    
+    
+    Blas::MatrixHandle<double> weightedShapesEvaluationBuilder(numShapes,
+							       qn,
+							       weightedShapesEvaluation,
+							       numShapes);
+
+#endif
+    
+    double*mappingEvaluation = new double[qn*2];
+    Blas::MatrixHandle<double> mappingEvaluationBuilder(qn,
+							2,
+							mappingEvaluation,
+							qn);
+
+    f1.Eval(qn,
+	    "No transposed",
+	    positions.data(),
+	    1,
+	    "No Transposed",
+	    mappingEvaluation,
+	    2);
+    
+    Blas::VectorHandle<double> localrhs(numShapes);
+    Blas::VectorHandle<double> globalCoordinates(qn);
+    //    Blas::VectorHandle<double> cellCoordinates(2);
+    Blas::VectorHandle<double> user(qn);
+    //    double*user = new double[qn];
+
+    Blas::VectorHandle<double> jacobianMapping(numCells);
+    for (unsigned int cellIndex = 0;cellIndex < numCells;++cellIndex)
+      {
+	grid1D.GetCoordinates(cellIndex,cellCoordinates);
+	jacobianMapping[cellIndex] = (cellCoordinates[1] - cellCoordinates[0])*double(0.5);
+      }
+    
+    auto start = std::chrono::system_clock::now();
+    //
+    // Right-hand side
+    //
+    SpaceType::CellToDofs cellToDofs;
+    for (unsigned int cellIndex = 0;cellIndex < numCells;++cellIndex)
+      {
+	//
+	// reset
+	//
+	localrhs = double(0.0);
+	
+	grid1D.GetCoordinates(cellIndex,cellCoordinates);
+	space1D.GetCellToDofs(cellIndex,cellToDofs);
+	const double jac = (cellCoordinates[1] - cellCoordinates[0])/2.0;
+
+	globalCoordinates = mappingEvaluationBuilder * cellCoordinates;
+	
+
+	for (unsigned int k=0;k<qn;++k)
+	  {
+	    user[k] = weights[k] * f(globalCoordinates[k]);
+	  }
+
+	//
+	// Multiply by the weights
+	//
+	//	user *= weights;
+
+	//
+	//
+	// 
+	localrhs = shapesEvaluationBuilder * user;
+	localrhs *= jac;//jacobianMapping[cellIndex];
+
+	rhs[cellToDofs] += localrhs;	
+      }    
+
+    auto end = std::chrono::system_clock::now();
+
+    std::chrono::duration<double> elapsed_seconds = end-start;
+    std::time_t end_time = std::chrono::system_clock::to_time_t(end);
+
+    std::cout << "finished computation at " << std::ctime(&end_time)
+	      << "elapsed time: " << elapsed_seconds.count() << "s\n";
+
+    for (unsigned int cellIndex = 0;cellIndex < numCells;++cellIndex)
+      {
+	grid1D.GetCoordinates(cellIndex,
+			      cellCoordinates);
+	//	const double jac = (cellCoordinates[1] - cellCoordinates[0])/2.0;
+
+	mass = double(0.0);	
+	for (unsigned int k=0;k<qn;++k)
+	  {
+	    const auto r = positions[k];
+	    f2.Eval(r,phi);
+	    f2.Eval(r,psi);
+	    for (unsigned int j=0;j<numShapes;++j)
+	      {	  
+		for (unsigned int i=0;i<numShapes;++i)
+		  {		
+		    mass[j*numShapes+i] += weights[k] * phi[j] * psi[i];
+		  }
+	      }
+	  }
+
+	mass *= jacobianMapping[cellIndex];
+	space1D.GetCellToDofs(cellIndex,cellToDofs);	
+	//
+	// assembly
+	//
+	for (unsigned int i=0;i<numShapes;++i)
+	  {
+	    const auto idof = cellToDofs[i];	    
+	    for (unsigned int j=0;j<numShapes;++j)
+	      {
+		const auto jdof = cellToDofs[j];
+		//		std::cout << mass[j*numShapes+i] << std::endl;
+
+		Sparse_ass(endomorphism,
+			   idof,
+			   jdof,
+			   mass[j*numShapes+i]);
+	      }
+	  }
+      }    
+  }
+
+  {  
+    LinearSolver::Direct::MKL::Pardiso linearSolver(endomorphism);
+    bool hasFailed;
+    linearSolver.Compute(&hasFailed);
+    if (hasFailed)
+      {
+	std::cerr << "pardiso failed"  << std::endl;
+      }
+    
+    double tmp[1];
+    bool outHasFailed;
+    linearSolver.Apply("No transpose",
+		       X,
+		       rhs.GetData(),
+		       1,
+		       tmp,
+		       &outHasFailed);
+
+    if (hasFailed)
+      {
+	std::cerr << "pardiso failed"  << std::endl;
+      }
+  }
+
+  //  return 0;
+  {
+    double w[32];
+    SpaceType::CellToDofs cellToDofs;
+    for (unsigned int cellIndex = 0;cellIndex < 0;++cellIndex)
+      {
+	space1D.GetCellToDofs(cellIndex,
+			      cellToDofs); 
+	grid1D.GetCoordinates(cellIndex,cellCoordinates);
+	
+	for (unsigned int i=0;i<numShapes;++i)
+	  {
+	    w[i] = X[cellToDofs[i]];
+	  }
+
+	const int n = 100;
+	for (int i=0;i<n;++i)
+	  {
+	    const auto r = -1.0 + 2.0*i/(n-1);
+	    const auto s = r * 0.5 + 0.5;
+	    const auto x  = cellCoordinates[0] * (1.0 - s) + s * cellCoordinates[1];	    
+	    f2.Eval(r,phi);
+	    double t = 0.0;
+	    for (unsigned int j=0;j<numShapes;++j)
+	      {
+		t+=w[j] * phi[j];
+	      }
+
+	    std::cout << x << " " << t << " " << fabs(f(x)-t)<<std::endl;	   
+	  }
+	
+      }
+    for (unsigned int cellIndex = 0;cellIndex < numCells;++cellIndex)
+      {
+	space1D.GetCellToDofs(cellIndex,
+			      cellToDofs);	
+
+	
+	{
+	  int i =0;
+	  std::cout << space1D.GetDofCoordinates(cellToDofs[i]) << " " << X[cellToDofs[i]] << " " << fabs(f(space1D.GetDofCoordinates(cellToDofs[i]))-X[cellToDofs[i]])<<std::endl;
+
+	}
+
+	for (unsigned int i=2;i<numShapes;++i)
+	  {
+	    std::cout << space1D.GetDofCoordinates(cellToDofs[i]) << " " << X[cellToDofs[i]] << " " << fabs(f(space1D.GetDofCoordinates(cellToDofs[i]))-X[cellToDofs[i]])<<std::endl;
+	  }
+
+	if (cellIndex==numCells-1)
+	  {
+	{
+	  int i =1;
+	  std::cout << space1D.GetDofCoordinates(cellToDofs[i]) << " " << X[cellToDofs[i]] << " " << fabs(f(space1D.GetDofCoordinates(cellToDofs[i]))-X[cellToDofs[i]])<<std::endl;
+
+	}
+	  }	
+      }
+  }
+
+
+  
+#if 0
+  for (int i=0;i<numDofs;++i)
+    {
+      std::cout << space1D.GetDofCoordinates(i) << " " << X[i] << std::endl;
+    }
+#endif  
+  return 0;
+}
