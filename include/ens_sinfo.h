@@ -4,7 +4,7 @@
 
 #include "Type.h"
 #include "ConfigEnum.h"
-#include "Cmdline.h"
+// #include "Cmdline.h"
 
 
 
@@ -15,9 +15,9 @@ ConfigEnum(ens_sinfo,
 
 
 ConfigOption(cst_pS,ens_sinfo);
-
+#if 0
 void ens_sinfo_from_Cmdline(STR		sinfo_[__ens_sinfo_ALL],
 			    const L	have_configfile_,
 			    pCmdline  const 	cmdline_);
-
+#endif
 #endif

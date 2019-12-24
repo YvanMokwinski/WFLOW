@@ -2,7 +2,7 @@
 
 #include <signal.h>
 #include <pthread.h>
-#include "Cmdline.h"
+#include "cmdline.hpp"
 #include "ns_config.h"
 
 
@@ -650,28 +650,22 @@ class Solver
 {
 protected:
 
-  Cmdline 		m_cmdline;
+  cmdline 		m_cmdline;
   Parameters* 		m_parameters {};
   Global* 		m_solver {};
   ns_mesh 		m_mesh;
   
 public:
   Solver(int 		argc,
-	 const char**	argv,
+	 char**		argv,
 	 STR 		errmsg_,
 	 Err*		err_)
+    : m_cmdline(argc,argv)
   {
-    //
-    // Initialization of the command line
-    //
-    Cmdline_def (&m_cmdline,
-		 argc,
-		 argv);    
     
     I nproc = 1;
-    if (false == Cmdline_get_integer(&m_cmdline,
-				     "-n",
-				     &nproc))
+    if (false == this->m_cmdline.get_integer("-n",
+					     &nproc))
       {
 	Monitor_warn(0,"set nproc to 1");
 	nproc=1;
@@ -811,7 +805,7 @@ public:
 
 
 int main(int 		argc,
-	 const char**	argv)
+	 char**		argv)
 {
 
   Monitor_def(0,

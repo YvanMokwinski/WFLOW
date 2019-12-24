@@ -1,5 +1,5 @@
 #include "ns_sys.h"
-#include "Cmdline.h"
+// #include "Cmdline.h"
 #include "ens_sinfo.h"
 
 
@@ -14,6 +14,8 @@ ConfigOptionTable(cst_pS,
 		  {__ens_sinfo_pblmname,"laplace","name of the problem","--pblm","PBLMNAME"},
 		  {__ens_sinfo_ofilename,"ns.out","name of the output file","-o","OFILENAME"} );
 
+#if 0
+#include "Cmdline.h"
 
 void ens_sinfo_from_Cmdline(STR 			sinfo_[__ens_sinfo_ALL],
 			    const L  		have_configfile_,
@@ -35,3 +37,4 @@ void ens_sinfo_from_Cmdline(STR 			sinfo_[__ens_sinfo_ALL],
 	  }
       } }
 }
+#endif

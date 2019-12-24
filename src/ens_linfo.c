@@ -1,5 +1,4 @@
 #include "ns_sys.h"
-#include "Cmdline.h"
 #include "ens_linfo.h"
 
 ConfigEnumStrings(ens_linfo,
@@ -46,6 +45,8 @@ ConfigOptionTable(L,
 		  {__ens_linfo_skip_verif,__emnsNO,"skip verif","-f","SKIP_VERIF"} );
 
 
+#if 0
+#include "Cmdline.h"
 void ens_linfo_from_Cmdline(L 		linfo_[__ens_linfo_ALL],
 			    const L 	have_configfile_,
 			    pCmdline const 	cmdline_)
@@ -71,3 +72,4 @@ void ens_linfo_from_Cmdline(L 		linfo_[__ens_linfo_ALL],
 	}
     }
 }
+#endif

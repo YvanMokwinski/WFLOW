@@ -2,7 +2,7 @@
 #define __header__ens_iinfo_h__
 
 #include "ConfigEnum.h"
-#include "Cmdline.h"
+// #include "Cmdline.h"
 
 ConfigEnum(ens_iinfo,
 	   __ens_iinfo_newton_maxiter,
@@ -17,10 +17,10 @@ ConfigEnum(ens_iinfo,
 
 
 ConfigOption(I,ens_iinfo);
-
+#if 0
 void ens_iinfo_from_Cmdline(I 			iinfo_[__ens_iinfo_ALL],
 			    const L		have_configfile_,
 			    pCmdline  const 	cmdline_);
-
+#endif
 
 #endif

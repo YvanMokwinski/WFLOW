@@ -1,7 +1,5 @@
-#ifndef __header_Parameters_hpp__
-#define __header_Parameters_hpp__
-
-#include "Cmdline.h"
+#pragma once
+#include "cmdline.hpp"
 
 #include "ns_enum.h"
 #include "eHeaviside.h"
@@ -311,7 +309,7 @@ private:
 
 public:
 
-  Parameters(pCmdline const cmdline_,const bool	have_configfile_)
+  Parameters(cmdline * cmdline_,const bool	have_configfile_)
   {
 
     { InfoString::EnumType i = InfoString::ERROR;
@@ -325,9 +323,8 @@ public:
 	    }
 #endif
 	  STR name;
-	  const L a = Cmdline_get_string(cmdline_,
-					 InfoAccessString::GetNameCmdline(i),
-					 &name[0]);
+	  const bool a = cmdline_->get_string(InfoAccessString::GetNameCmdline(i),
+					     &name[0]);
 	  if ( (NOT a) AND (NOT have_configfile_) )
 	    {
 	      this->m_sinfo[i] = InfoAccessString::GetDefaultValue(i);
@@ -344,9 +341,8 @@ public:
 	    fprintf(stderr,"ens_rinfo_argv:wrong dat nbase\n");
 	  }
 #endif
-	const L a = Cmdline_get_integer(cmdline_,
-					InfoAccessInteger::GetNameCmdline(i),
-					&this->m_iinfo[i]);
+	const bool a = cmdline_->get_integer(InfoAccessInteger::GetNameCmdline(i),
+					    &this->m_iinfo[i]);
 	if ( (NOT a) AND (NOT have_configfile_) )
 	  {
 	    this->m_iinfo[i] = InfoAccessInteger::GetDefaultValue(i);
@@ -363,9 +359,8 @@ public:
 	      fprintf(stderr,"ens_rinfo_argv:wrong dat nbase\n");
 	    }
 #endif
-	  const L a = Cmdline_get_real(cmdline_,
-				       InfoAccessReal::GetNameCmdline(i),
-				       &this->m_rinfo[i]);
+	  const bool a = cmdline_->get_real(InfoAccessReal::GetNameCmdline(i),
+					  &this->m_rinfo[i]);
 	  if ( (NOT a) AND (NOT have_configfile_) )
 	    {
 	      this->m_rinfo[i] = InfoAccessReal::GetDefaultValue(i);
@@ -382,8 +377,7 @@ public:
 	      fprintf(stderr,"ens_linfo_argv:wrong dat nbase\n");
 	    }
 #endif	
-	  const L a = Cmdline_get_logical(cmdline_,
-					  InfoAccessLogical::GetNameCmdline(value));
+	  const bool a = cmdline_->get_logical(InfoAccessLogical::GetNameCmdline(value));
 	  if (a)
 	    {
 	      this->m_linfo[value] = !InfoAccessLogical::GetDefaultValue(value);
@@ -507,5 +501,3 @@ extern "C"
 
 }
 
-
-#endif

@@ -1,5 +1,4 @@
 #include "ns_sys.h"
-#include "Cmdline.h"
 #include "ens_rinfo.h"
 
 ConfigEnumStrings(ens_rinfo,
@@ -33,7 +32,8 @@ ConfigOptionTable(R,
 		  {__ens_rinfo_weber,((R)0.5),"weber number","--weber","WEBER"},
 		  {__ens_rinfo_froude,((R)0.5),"froude number","--froude","FROUDE"});
 
-
+#if 0
+#include "Cmdline.h"
 void ens_rinfo_from_Cmdline(R 			rinfo_[__ens_rinfo_ALL],
 			    const L  	have_configfile_,
 			    pCmdline const 	cmdline_)
@@ -53,3 +53,4 @@ void ens_rinfo_from_Cmdline(R 			rinfo_[__ens_rinfo_ALL],
 	  }
       } }
 }
+#endif

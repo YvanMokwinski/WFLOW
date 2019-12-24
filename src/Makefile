@@ -23,9 +23,9 @@ TRASH=	DgTransport_routine.o \
 	DgTransport_compute.o \
 
 
-#	SparseIterative.o \
+#	SparseIterative.o Cmdline.o \
 
-OBJ=	mkQ.o \
+OBJ=	cmdline.o mkQ.o \
 	DgTransport_shape.o \
 	LinsysVectors.o \
 	Sparse.o \
@@ -40,7 +40,7 @@ OBJ=	mkQ.o \
 	eTransientMethod.o \
 	eTensionMethod.o \
 	eFileSuffix.o \
-	Points.o Matrix.o TransientScheme.o  extern_medit.o Cmdline.o \
+	Points.o Matrix.o TransientScheme.o  extern_medit.o  \
 	\
 	SmoothedHeaviside.o \
 	SmoothedDirac.o \

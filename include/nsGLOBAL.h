@@ -8,7 +8,7 @@
 #include "ns_enum.h"
 #include "eDim.h"
 #include "ns_var.h"
-#include "Cmdline.h"
+// #include "Cmdline.h"
 #include "ens_method_transfert.h"
 
 #include "Parameters.h"
@@ -229,12 +229,12 @@ extern "C"
 					 cst_pR 		loc_,
 					 cst_pR 		uvw_);
 
-
+#if 0
   void 			Global_main			(pGlobal 	const 	global_,
 							 pCmdline 	const 	cmdline_,
 							 STR 			errmsg_,
 							 Err*			err_);
-
+#endif
   void 			Global_precompute		(pGlobal	const 	self_,
 							 ns_mesh * 	const 	mesh_,
 							 STR 			errmsg_,

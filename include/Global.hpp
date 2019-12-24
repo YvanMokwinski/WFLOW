@@ -64,11 +64,11 @@ protected: StokesNonLinearSolverDriver* 	m_stokesNonLinearSolverDriver;
 public: Err Global_default();
   
 private:  void Global_main(pGlobal const 	self_,
-			   pCmdline const 	cmdline_,
+			   cmdline* 		cmdline_,
 			   STR 			errmsg_,
 			   Err*			err_);
   
-public:  Global(pCmdline 	const 	cmdline_,
+public:  Global(cmdline* 	 	cmdline_,
 		STR 			errmsg_,
 		Err*			err_);
 
@@ -146,7 +146,7 @@ Err Global::Global_default()
 
   
  void Global::Global_main(pGlobal const 	self_,
-			   pCmdline const 	cmdline_,
+			  cmdline* 	cmdline_,
 			   STR 			errmsg_,
 			   Err*			err_)
   {
@@ -180,7 +180,7 @@ Err Global::Global_default()
       0/ READ CONFIG FILE ? 
     */  
     { STR ctmp;
-      if ( (Cmdline_get_string(cmdline_,"-c",ctmp)) )
+      if ( (cmdline_->get_string("-c",ctmp)) )
 	{
 #ifndef NDEBUG
 	  Monitor_msg(0,"ns_global_main:mkmake_ns_read_configfile(%s) ...\n",ctmp);
@@ -214,13 +214,13 @@ Err Global::Global_default()
     //
     // 2/ CHECK INVALID ARGUMENT FROM COMMAND LINE 
     //
-    err_[0] = Cmdline_check_invalid(cmdline_);
+    err_[0] = (cmdline_->check_invalid()) ? __eErr_user : __eErr_no;
     if (err_[0])
       {
 	Monitor_errmsg(this->iproc,"nsGLOBAL_main:Cmdline_check_invalid failed");
 	return;
       }
-    const L  cmdline_isempty = Cmdline_isempty(cmdline_);
+    const bool cmdline_isempty = cmdline_->isempty();
 
     const I restart = parameters->GetInfoInteger(InfoInteger::restart);
     //
@@ -251,7 +251,7 @@ Err Global::Global_default()
       }
     else
       {
-	self_->filename = Cmdline_get_arg(cmdline_,1);
+	self_->filename = cmdline_->get_arg(1);
 	ns_basename(self_->filename,self_->basename);
       }
   
@@ -400,7 +400,7 @@ Err Global::Global_default()
     return;
   };
   
-Global::Global(pCmdline 	const 	cmdline_,
+Global::Global(cmdline*		cmdline_,
 	 STR 			errmsg_,
 	 Err*			err_)
   {

@@ -1,7 +1,7 @@
 #ifndef __header__ens_linfo_h__
 #define __header__ens_linfo_h__
 #include "ConfigEnum.h"
-#include "Cmdline.h"
+//#include "Cmdline.h"
 
 
 ConfigEnum(ens_linfo,
@@ -28,9 +28,11 @@ ConfigEnum(ens_linfo,
 
 ConfigOption(L,ens_linfo);
 
+#if 0
 void ens_linfo_from_Cmdline(L 		linfo_[__ens_linfo_ALL],
 			    const L  	have_configfile_,
 			    pCmdline const 	cmdline_);
+#endif
 
 #endif
 

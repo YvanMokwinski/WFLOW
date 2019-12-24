@@ -2,7 +2,7 @@
 #define __header__ens_rinfo_h__
 
 #include "ConfigEnum.h"
-#include "Cmdline.h"
+// #include "Cmdline.h"
 
 
 ConfigEnum(ens_rinfo,
@@ -22,11 +22,11 @@ ConfigEnum(ens_rinfo,
 
 
 ConfigOption(R,ens_rinfo);
-
+#if 0
 void ens_rinfo_from_Cmdline(R 			rinfo_[__ens_rinfo_ALL],
 			    const L	have_configfile_,
 			    pCmdline  const 	cmdline_);
-
+#endif
 
 
 #endif

@@ -1,6 +1,6 @@
 #include "ns_sys.h"
 #include "ens_iinfo.h"
-#include "Cmdline.h"
+//#include "Cmdline.h"
 #include "eHeaviside.h"
 #include "eDirac.h"
 
@@ -41,6 +41,8 @@ ConfigOptionTable(I,
 		  {__ens_iinfo_restart,((I)0),"restart time step","--ns-restart","RESTART"},
 		  {__ens_iinfo_nproc,((I)1),"nproc","-n","NPROC"});
 
+#if 0
+#include "Cmdline.h"
 
 void ens_iinfo_from_Cmdline(I 			iinfo_[__ens_iinfo_ALL],
 			    const L 	have_configfile_,
@@ -60,5 +62,5 @@ void ens_iinfo_from_Cmdline(I 			iinfo_[__ens_iinfo_ALL],
 	}
     }
 }
-
+#endif
 

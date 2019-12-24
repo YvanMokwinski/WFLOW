@@ -1,7 +1,7 @@
 #ifndef __header_Parameters_h__
 #define __header_Parameters_h__
 
-#include "Cmdline.h"
+// #include "Cmdline.h"
 #include "ns_enum.h"
 
 #ifdef __cplusplus
@@ -34,11 +34,11 @@ extern "C"
   
   eLinearSolver 	ParametersReadOnly_get_eLinearSolver	(pParametersReadOnly 	const 	self_,
 								 eKindEquation 			kindEquation_);
-  
+#if 0  
   Err 			Parameters_def				(pParameters 		const 	self_,
 								 pCmdline		const 	cmdline_,
 								 const L			have_configfile);
-  
+#endif  
   void 			Parameters_free				(pParameters  		const 	self_);
 #endif
   
